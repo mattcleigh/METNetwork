@@ -34,6 +34,7 @@ class METDataset(IterableDataset):
         if worker_info is None:
             worker_files = self.file_list
 
+        ## For multiple workers we break up the file list so they each work on a single subset
         else:
             wrk_id = worker_info.id
             n_wrks = worker_info.num_workers
@@ -46,7 +47,7 @@ class METDataset(IterableDataset):
         ## We iterate through the open files collection
         for ofiles in ofiles_list:
 
-            ## The iterator itself
+            ## We iterate through the chunks taken from the files
             for c_count in count():
 
                 ## Fill the buffer with the next set of chunks from the files
@@ -68,7 +69,7 @@ class METDataset(IterableDataset):
 
     def load_chunks(self, files, c_count):
 
-        ## Work out the location of the new chunk
+        ## Work out the bounds of the new chunk
         start = c_count * self.chnk_size
         end = start + self.chnk_size
 
@@ -78,14 +79,14 @@ class METDataset(IterableDataset):
 
             ## Running "with" ensures the file is closed
             with h5py.File( f, 'r' ) as hf:
-                chunk = hf["data/table"][start:end]
-                chunk = np.array([c[1] for c in chunk])
+                chunk = hf["data/table"][start:end]     ## Will return an empty list if we asked for idx outside filesize
+                chunk = np.array([c[1] for c in chunk]) ## Annoying thing we must do as the data is a tuple (idx, [sample])
 
             ## If the chunk is non empty we add it to the buffer
             if len(chunk) != 0:
                 buffer.append(chunk)
 
-        ## If the list is empty it means that no files have any data left
+        ## If the buffer is empty it means that no files had any data left
         if len(buffer) == 0:
             return None
 
@@ -95,4 +96,5 @@ class METDataset(IterableDataset):
         return buffer
 
     def shuffle_files(self):
+        ## We shuffle the file list, this is called at the end of each epoch
         np.random.shuffle( self.file_list )
