@@ -18,28 +18,29 @@ from itertools import count
 import torch as T
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader, ConcatDataset
+from torch.utils.data import DataLoader
 
 class METNET_Agent(object):
     def __init__(self, name, save_dir ):
         self.name = os.path.join( save_dir, name )
 
-    def setup_dataset( self, data_dir, batch_size, n_workers, stat_file, x_ids ):
+    def setup_dataset( self, train_files, test_files, stat_file, n_ofiles, chnk_size, batch_size, n_workers ):
         """ Uses a pytorch dataloader to get the training and testing sets
         """
         ## Load the stat file and the x indeces for pre-processing
         self.stat_file = stat_file
-        self.x_ids = x_ids
 
         ## Get the defined dataset objects (created from multiple files)
-        train_set = ConcatDataset( [ myDS.METDataset( file, stat_file=stat_file, x_ids=x_ids ) for file in self.file_list ] )
-        test_set  = ConcatDataset( [ myDS.METDataset( file, stat_file=stat_file, x_ids=x_ids ) for file in self.file_list ] )
+        train_set = myDS.METDataset( train_files, n_ofiles, chnk_size )
+        test_set  = myDS.METDataset( test_files,  n_ofiles, chnk_size )
 
         ## Create the pytorch dataloaders
-        self.train_loader = DataLoader( train_set, batch_size=batch_size, num_workers=n_workers, shuffle=False )
-        self.test_loader  = DataLoader( test_set,  batch_size=batch_size, num_workers=n_workers, shuffle=False )
+        self.train_loader = DataLoader( train_set, batch_size=batch_size, num_workers=n_workers )
+        self.test_loader  = DataLoader( test_set,  batch_size=batch_size, num_workers=n_workers )
 
-        print("Number of files found: ", len(self.file_list) )
+        ## Report on the number of files used
+        print( "# Files used in train set: ", len(train_set.file_list) )
+        print( "# Files used in test set:  ", len(test_set.file_list) )
 
     def setup_network( self, act, depth, width, skips, nrm, drpt ):
         """ This initialises the mlp network structure
@@ -85,7 +86,7 @@ class METNET_Agent(object):
             targets = targets.to(self.network.device)
 
             ## Calculate the network output
-            outputs = self.network.mlp( inputs )
+            outputs = self.network( inputs )
 
             ## Calculate the batch loss
             loss = self.loss_fn( outputs, targets )
@@ -99,22 +100,23 @@ class METNET_Agent(object):
             running_loss += loss.item()
 
         ## Update loss history and epoch counter
-        self.trn_hist.append( running_loss / len(self.train_loader ) )
+        self.trn_hist.append( running_loss / i )
         self.epochs_trained += 1
 
     def testing_epoch(self):
         """ This function performs one epoch of testing on data provided by the test_loader
         """
+
         with T.no_grad():
-            self.network.train()
+            self.network.eval()
             running_loss = 0
             for i, (inputs, targets) in enumerate( tqdm( self.test_loader, desc="Testing ", ncols=80, unit="" ) ):
                 inputs = inputs.to(self.network.device)
                 targets = targets.to(self.network.device)
-                outputs = self.network.mlp( inputs )
+                outputs = self.network( inputs )
                 loss = self.loss_fn( outputs, targets )
                 running_loss += loss.item()
-            self.tst_hist.append( running_loss / len(self.train_loader ) )
+            self.tst_hist.append( running_loss / i )
 
     def run_training_loop( self, patience = 20 ):
         """ This is the main loop which cycles epochs of train and test
@@ -131,6 +133,10 @@ class METNET_Agent(object):
             ## Run the test/train cycle
             self.testing_epoch()
             self.training_epoch()
+
+            ## Shuffle the file order in the datasets
+            self.train_loader.dataset.shuffle_files()
+            self.test_loader.dataset.shuffle_files()
 
             ## For time keeping
             self.tim_hist.append( time.time() - e_start_time )

@@ -10,17 +10,18 @@ def main():
     ## Initialise the model
     model = Model.METNET_Agent( name = "METNet", save_dir = "Saved_Models" )
 
+
     ## Load up the dataset
-    model.setup_dataset( train_files = "Data/Training/*.h5",
-                         test_files = "Data/Training/*.h5",
-                         batch_size = 4000, n_workers = 12,
-                         stat_file = "Data/Training/stats.csv",
-                         x_ids = [4, 9, 14, 19, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 75] )
+    model.setup_dataset( train_files = "Data/Training/rot_sample*.h5",
+                         test_files  = "Data/Training/rot_sample*.h5",
+                         stat_file   = "Data/Training/rot_stats.csv",
+                         n_ofiles    = 1,   chnk_size = 256,
+                         batch_size  = 512, n_workers = 8 )
 
     ## Initialise the prepost-MLP network
     model.setup_network( act = nn.LeakyReLU(0.2),
-                         depth = 5,   width = 128,  skips = 2,
-                         nrm = True,  drpt = 0.2 )
+                         depth = 5,   width = 512,  skips = 0,
+                         nrm = False,  drpt = 0.0 )
 
     ## Setup up the parameters for training
     model.setup_training( loss_fn = nn.SmoothL1Loss(),
