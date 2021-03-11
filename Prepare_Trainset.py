@@ -13,6 +13,7 @@ def main():
     ################### User defined variables
     base_dir  = "Data/Training/"
     file_core = "**train-sample.csv"
+    out_dir   = "Data/Rotated/"
     do_rot    = True
     ###################
 
@@ -69,13 +70,13 @@ def main():
     ## Convert the array back into a dataframe so we can save it (cast to float)
     out_df = normed.to_dask_dataframe( columns=col_names ).astype(np.float32)
     outfile = ("rot_" if do_rot else "") + "sample-*.h5"
-    out_df.to_hdf( os.path.join( base_dir, outfile ), "/data", mode="w" )
+    out_df.to_hdf( os.path.join( out_dir, outfile ), "/data", mode="w" )
 
     ## Package and save the stats together
     stats = np.vstack(( mean.compute(), sdev.compute() ))
     stat_df = pd.DataFrame( data=stats, columns=col_names )
     stat_file = ("rot_" if do_rot else "") + "stats.csv"
-    stat_df.to_csv( os.path.join( base_dir, stat_file), index=False )
+    stat_df.to_csv( os.path.join( out_dir, stat_file), index=False )
 
 if __name__ == '__main__':
     main()

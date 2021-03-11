@@ -183,6 +183,15 @@ class METNET_Agent(object):
             out_array = np.transpose( np.vstack(( self.trn_hist, self.tst_hist, self.tim_hist )) )
             np.savetxt( os.path.join( self.name, "train_hist.csv" ), out_array )
 
+        ## We also save a list of all the current class attributes
+        if flag=="latest":
+            with open("info.txt", "w") as f:
+                for d in self.__dict__:
+                    if d not in ["trn_hist", "tst_hist", "tim_hist", "loss_plot"]:
+                        f.write(d+"\n")
+                        f.write(str(self.__dict__[d])+"\n")
+                        f.write("\n")
+
     def load( self, flag = "" ):
 
         ## Load the network and optimiser
