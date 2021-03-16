@@ -1,7 +1,3 @@
-import sys
-home_env = '../'
-sys.path.append(home_env)
-
 import torch as T
 import torch.nn as nn
 import onnx

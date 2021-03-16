@@ -1,7 +1,3 @@
-import sys
-home_env = '../'
-sys.path.append(home_env)
-
 from Resources import Layers as myLL
 
 import torch as T
@@ -13,12 +9,12 @@ class MET_MLP(nn.Module):
         The network also can have skip arcs
     """
 
-    def __init__( self, name, act, depth, width, skips, nrm, drpt ):
+    def __init__( self, name, n_in, act, depth, width, skips, nrm, drpt ):
         super(MET_MLP, self).__init__()
 
         ## Defining the network features
         self.__dict__.update(locals())
-        self.mlp = myLL.res_mlp_creator( n_in=74, n_out=2, depth=depth, width=width,
+        self.mlp = myLL.res_mlp_creator( n_in=n_in, n_out=2, depth=depth, width=width,
                                          skips=skips, act_h=act, nrm=nrm, drpt=drpt )
 
         ## Moving the network to the device

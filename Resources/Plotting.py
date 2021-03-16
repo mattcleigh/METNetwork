@@ -1,9 +1,7 @@
-import sys
-home_env = '../'
-sys.path.append(home_env)
-
 import numpy as np
 import matplotlib.pyplot as plt
+
+
 
 class loss_plot(object):
     def __init__(self, title = ""):
@@ -15,7 +13,7 @@ class loss_plot(object):
         self.trn_line, = self.ax.plot( [], "-r", label="Train" )
         self.tst_line, = self.ax.plot( [], "-g", label="Test" )
 
-    def update(self, trn_data, tst_data):
+    def _update(self, trn_data, tst_data):
 
         x_data = np.arange(len(trn_data))
 
@@ -26,5 +24,11 @@ class loss_plot(object):
         self.ax.autoscale_view()
         self.ax.legend()
 
+    def draw(self, trn_data, tst_data):
+        self._update(trn_data, tst_data)
         self.fig.canvas.draw()
         self.fig.canvas.flush_events()
+
+    def save(self, trn_data, tst_data, fname):
+        self._update(trn_data, tst_data)
+        self.fig.savefig(fname)

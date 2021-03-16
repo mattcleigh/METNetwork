@@ -1,7 +1,3 @@
-import sys
-home_env = '../'
-sys.path.append(home_env)
-
 import glob
 import h5py
 import numpy as np
@@ -9,14 +5,40 @@ import numpy.random as rd
 from itertools import count
 
 import torch as T
-import torchvision as TV
 from torch.utils.data import IterableDataset
 
+def buildTrainAndValidation( data_dir, test_frac ):
+
+    ## Search the directory for HDF files
+    file_list = np.array( glob.glob( data_dir + "*.h5" ) )
+
+    ## Exit if no files can be found
+    if len(file_list) == 0:
+        print("No files could be found with the search tag: ", data_dir, "*.h5" )
+        exit()
+
+    ## Split the file list according to the test_frac
+    n_test  = int( len(file_list) * test_frac + 0.5 )
+    n_train = len(file_list) - n_test
+    train_files = file_list[:-n_test]
+    test_files  = file_list[-n_test:]
+
+    return train_files, test_files
+
 class METDataset(IterableDataset):
-    def __init__(self, file_names, n_ofiles, chnk_size):
-        self.file_list = np.array(glob.glob(file_names))
+    def __init__(self, file_list, n_ofiles, chnk_size):
+        self.file_list = file_list
         self.n_ofiles  = n_ofiles
         self.chnk_size = chnk_size
+
+        ## Calculate the number of samples in the dataset set
+        self.n_samples = 0
+        for file in self.file_list:
+            with h5py.File( file, 'r' ) as hf:
+                self.n_samples += len(hf["data/table"])
+
+    def __len__(self):
+        return self.n_samples
 
     def __iter__(self):
         """ This function is called whenever an iterator is created on the
@@ -30,7 +52,7 @@ class METDataset(IterableDataset):
         ## Get the worker info
         worker_info = T.utils.data.get_worker_info()
 
-        ## If it is None, we are doing single process loading
+        ## If it is None, we are doing single process loading, worker uses whole file list
         if worker_info is None:
             worker_files = self.file_list
 
@@ -40,9 +62,10 @@ class METDataset(IterableDataset):
             n_wrks = worker_info.num_workers
             worker_files = np.array_split( self.file_list, n_wrks )[wrk_id]
 
-        ## Further split the file list into the ones open at a time
-        n_splits = len(worker_files) / self.n_ofiles
-        ofiles_list = np.array_split(worker_files, n_splits)
+        ## Further partition the worker's file list into the ones open at a time
+        ofiles_list = []
+        for i in range( -( - len(worker_files) // self.n_ofiles ) ): ## Divide into chunks + round up
+            ofiles_list.append( worker_files[ i * self.n_ofiles : (i + 1) * self.n_ofiles] )
 
         ## We iterate through the open files collection
         for ofiles in ofiles_list:
