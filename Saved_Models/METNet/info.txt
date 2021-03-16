@@ -22,13 +22,14 @@ drpt            = 0.0
 loss_fn         = SmoothL1Loss()
 lr              = 1e-05
 clip_grad       = 0
-trn_hist        = 0.07863149731297882
-vld_hist        = 0.0787135375866207
+trn_hist        = 0.07751454481231455
+vld_hist        = 0.07756614910354664
 tim_hist        = 39.71564173698425
-epochs_trained  = 3
+epochs_trained  = 10
 patience        = 10
 sv_every        = 5
-best_epoch      = 3
+best_epoch      = 10
+written_perf    = True
 
 
 MET_MLP(
