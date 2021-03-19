@@ -3,7 +3,6 @@ from Resources import Networks as myNN
 from Resources import Datasets as myDS
 
 import time
-import glob
 import shutil
 import numpy as np
 import pandas as pd
@@ -25,19 +24,22 @@ class METNET_Agent(object):
         self.save_dir = save_dir
         self.name = name
 
-        self.n_bins = 10            ## How many bins to use for the performance metrics
+        ## How to setup the bins for performance metrics
+        self.n_bins = 10
+        self.bin_max = 400
 
-    def setup_dataset( self, data_dir, stat_file, valid_frac, n_ofiles, chnk_size, batch_size, n_workers ):
+    def setup_dataset( self, data_dir, do_rot, valid_frac, n_ofiles, chnk_size, batch_size, n_workers ):
         """ Uses a pytorch dataloader to get the training and validation sets
         """
         ## Update our information dictionary
         self.__dict__.update( (k,v) for k,v in vars().items() if k != "self" )
 
-        ## Load the stat file and the x indeces for pre-processing
-        self.stat_file = stat_file
+        ## The data dir and the stat file depend on if we are doing rotations
+        self.data_dir  = Path( self.data_dir, "Rotated" if do_rot else "Raw" )
+        self.stat_file = Path( self.data_dir, "stats.csv" )
 
         ## Build the list of files that will be used in the train and validation set
-        train_files, valid_files = myDS.buildTrainAndValidation( data_dir, valid_frac )
+        train_files, valid_files = myDS.buildTrainAndValidation( self.data_dir, valid_frac )
         self.n_train_files = len(train_files)
         self.n_valid_files = len(valid_files)
 
@@ -46,8 +48,8 @@ class METNET_Agent(object):
         valid_set = myDS.METDataset( valid_files, n_ofiles, chnk_size )
 
         ## Create the pytorch dataloaders with num_workers accounting for low numbers of files
-        self.train_loader = DataLoader( train_set, batch_size = batch_size, num_workers = min(self.n_train_files, n_workers) )
-        self.valid_loader = DataLoader( valid_set, batch_size = batch_size, num_workers = min(self.n_valid_files, n_workers) )
+        self.train_loader = DataLoader( train_set, batch_size=batch_size, drop_last=True, num_workers=min(self.n_train_files, n_workers) )
+        self.valid_loader = DataLoader( valid_set, batch_size=batch_size, drop_last=True, num_workers=min(self.n_valid_files, n_workers) )
 
         ## Report on the number of files/samples used
         self.train_size = len(train_set)
@@ -55,11 +57,14 @@ class METNET_Agent(object):
         print( "Train set:       {} samples (in {} files)".format( self.train_size, self.n_train_files ) )
         print( "Validation set:  {} samples (in {} files)".format( self.valid_size, self.n_valid_files ) )
 
-    def setup_network( self, n_in, act, depth, width, skips, nrm, drpt ):
+    def setup_network( self, act, depth, width, skips, nrm, drpt ):
         """ This initialises the mlp network structure
         """
         ## Update our information dictionary
         self.__dict__.update( (k,v) for k,v in vars().items() if k != "self" )
+
+        ## We get the number of inputs based on the pre-process
+        n_in = 74 if self.do_rot else 76
 
         ## Creating the neural network
         self.network = myNN.MET_MLP( "res_mlp", n_in, act, depth, width, skips, nrm, drpt )
@@ -88,7 +93,7 @@ class METNET_Agent(object):
         self.network.train()
         running_loss = 0
 
-        for (inputs, targets) in tqdm( self.train_loader, desc="Training", ncols=80, unit="" ):
+        for i, (inputs, targets) in enumerate( tqdm( self.train_loader, desc="Training", ncols=80, unit="" ) ):
 
             ## Zero out the gradients
             self.optimiser.zero_grad()
@@ -110,9 +115,10 @@ class METNET_Agent(object):
 
             ## Update the running loss
             running_loss += loss.item()
+            break
 
         ## Update loss history and epoch counter
-        self.trn_hist.append( running_loss / len(self.train_loader) )
+        self.trn_hist.append( running_loss / (i+1) ) ## Divide by i as we dont include final batches
         self.epochs_trained += 1
 
     def _test_epoch(self):
@@ -122,22 +128,23 @@ class METNET_Agent(object):
         with T.no_grad():
             self.network.eval()
             running_loss = 0
-            for (inputs, targets) in tqdm( self.valid_loader, desc="Testing ", ncols=80, unit="" ):
+            for i, (inputs, targets) in enumerate( tqdm( self.valid_loader, desc="Testing ", ncols=80, unit="" ) ):
                 inputs = inputs.to(self.network.device)
                 targets = targets.to(self.network.device)
                 outputs = self.network( inputs )
                 loss = self.loss_fn( outputs, targets )
                 running_loss += loss.item()
-            self.vld_hist.append( running_loss / len(self.valid_loader) )
+                break
+            self.vld_hist.append( running_loss / (i+1) ) ## Divide by i as we dont include final batches
 
-    def run_training_loop( self, patience = 20, sv_every = 20 ):
+    def run_training_loop( self, max_epochs = 10, patience = 20, sv_every = 20 ):
         """ This is the main loop which cycles epochs of train and test
             It also updates graphs and saves the network
         """
         ## Update our information dictionary
         self.__dict__.update( (k,v) for k,v in vars().items() if k != "self" )
 
-        for epoch in count(1):
+        for epoch in range(1, max_epochs+1):
 
             print( "\nEpoch: {}".format(epoch) )
 
@@ -160,15 +167,15 @@ class METNET_Agent(object):
             print( "Average loss on validaiton set: {:.5}".format( self.vld_hist[-1] ) )
             print( "Epoch Time: {:.5}".format( self.tim_hist[-1] ) )
 
-            ## Saving a network checkpoint
-            if self.epochs_trained%sv_every == 0:
-                self.save( str(self.epochs_trained) )
-
             ## Calculate the number of bad epochs
             self.best_epoch = np.argmin(self.vld_hist) + 1
             bad_epochs = len(self.vld_hist) - self.best_epoch
 
-            ## Checking bad epochs and either saving or testing patience
+            ## Saving a network checkpoint
+            if self.epochs_trained%sv_every == 0:
+                self.save( str(self.epochs_trained) )
+
+            ## Checking if we have exceeded patience
             if bad_epochs == 0:
                 self.save( "best" )
             else:
@@ -177,84 +184,8 @@ class METNET_Agent(object):
                     print( "Patience Exceeded: Stopping training!" )
                     return 0
 
-    def save_perf( self, flag ):
-        print("\nCalculating additional performance metrics")
-
-        ## If we are saving the best version of the network, we must make sure that it is loaded!
-        if flag=="best":
-            model_name = Path( self.save_dir, self.name, "models", "net_best" )
-            self.network.load_state_dict( T.load( model_name ) )
-
-        ## Calculating performance will require un-normalising our outputs, so we need the stats
-        stats = np.loadtxt(self.stat_file, skiprows=1, delimiter=",")
-        means = T.from_numpy(stats[0,-2:]).to(self.network.device)
-        devs  = T.from_numpy(stats[1,-2:]).to(self.network.device)
-
-        ## The performance metrics to be calculated are stored in a running total matrix
-        run_totals = np.zeros( (self.n_bins, 4) ) ## Nbins, res, ang, lin
-
-        ## Iterate through the validation set
-        with T.no_grad():
-            self.network.eval()
-            for (inputs, targets) in tqdm( self.valid_loader, desc="Performance", ncols=80, unit="" ):
-
-                ## Pass the information through the network
-                inputs = inputs.to(self.network.device)
-                targets = targets.to(self.network.device)
-                outputs = self.network( inputs )
-
-                ## Un-normalise the outputs and the targets
-                targets = ( targets*devs + means ) / 1000 ## Convert to GeV (Dont like big numbers)
-                outputs = ( outputs*devs + means ) / 1000
-
-                ## Calculate the magnitudes of the vectors
-                targ_mag = T.norm(targets, dim=1)
-                outp_mag = T.norm(outputs, dim=1)
-
-                ## Get the bin numbers from the true met magnitude
-                bins = T.clamp( targ_mag // (300/self.n_bins), 0, self.n_bins-1 ).int().cpu().numpy()
-
-                ## Calculate the batch values for resolution, ang res and linearity
-                dot = T.sum( outputs * targets, dim=1 ) / ( outp_mag * targ_mag + 1e-4 )
-                res_tmp = ( outp_mag - targ_mag )**2
-                ang_tmp = T.acos( dot )**2
-                lin_tmp = ( outp_mag - targ_mag ) / ( targ_mag + 1e-4 )
-
-                ## Combine the metrics into a single numpy array
-                stack = T.stack( [res_tmp, ang_tmp, lin_tmp], -1).cpu().numpy() ## shape = batch x 3
-
-                ## Fill in out running data using the metric array and the bin number
-                for b in range(self.n_bins):
-                    chunk = stack[ bins==b ]
-                    new_info = np.concatenate( [ [len(chunk)], chunk.sum(axis=0) ] ) ## Len chunks will give the number of elements in the bin
-                    run_totals[b] += new_info
-
-        ## Getting the performance on the whole dataset
-        inclusive = np.concatenate( [run_totals.sum(axis=0, keepdims=True), run_totals ], axis=0 )
-        res = np.sqrt( inclusive[:,1] / inclusive[:,0] )
-        ang = np.sqrt( inclusive[:,2] / inclusive[:,0] )
-        lin = inclusive[:,3] / inclusive[:,0]
-
-        ## Getting the names of the columns
-        cols = [ "loss" ] \
-             + [ "res"+str(i) for i in range(-1, self.n_bins) ] \
-             + [ "ang"+str(i) for i in range(-1, self.n_bins) ] \
-             + [ "lin"+str(i) for i in range(-1, self.n_bins) ]
-        perm = np.concatenate( [ [self.vld_hist[-1]], res, ang, lin ] )
-        perm = np.expand_dims(perm, 0)
-
-        ## Values needed for writing to the csv file
-        fnm = Path( self.save_dir, self.name, "perf.csv" )
-        doh = not fnm.is_file()
-        wrt = "a" if fnm.is_file() else "w"
-        idx = [self.name + "_" + flag]
-
-        ## Write the dataframe to the csv
-        df = pd.DataFrame(data=perm, index=idx, columns=cols)
-        df.to_csv( fnm, mode=wrt, header=doh )
-
-        ## Now that we have written to the performance we want to update, not overwrite
-        self.written_perf = True
+        print( "\nMax number of epochs completed!" )
+        return 0
 
     def save( self, flag ):
         """
@@ -262,7 +193,6 @@ class METNET_Agent(object):
             - models   -> A folder containing the network and optimiser versions
             - info.txt -> A file containing the network setup and description
             - loss.csv -> Hitory of the train + validation losses (with png)
-            - perf.csv -> A csv containing the network performances at various stages
             - stat.csv -> Values used to normalise the data for the network
         """
 
@@ -270,7 +200,10 @@ class METNET_Agent(object):
         full_name = Path( self.save_dir, self.name )
 
         ## Our first ever call to this function should remove the contents of the directory and recreate
-        if self.epochs_trained==1: shutil.rmtree(full_name)
+        if self.epochs_trained == 1:
+            if full_name.exists():
+                print("Deleting files!")
+                shutil.rmtree(full_name)
         full_name.mkdir(parents=True, exist_ok=True)
 
         ## Save the network and optimiser tensors
@@ -282,23 +215,18 @@ class METNET_Agent(object):
         ## Save a file containing the network setup and description (based on class dict)
         with open( Path( full_name, "info.txt" ), 'w' ) as f:
             for key in self.__dict__:
-                attr = self.__dict__[key]
-                if isinstance(attr, list): attr = min(attr)
-                str_ver = str(attr)
-                if len(str_ver) > 50:
-                    continue
+                attr = self.__dict__[key]                   ## Information here is more inclusive than get_info below
+                if isinstance(attr, list): attr = min(attr) ## Lists are a pain to save, so we just use min
+                if len(str(attr)) > 50: continue            ## Long strings are ignored, these are pointers and class types
                 f.write( "{:15} = {}\n".format(key, str(attr)) )
             f.write( "\n\n"+str(self.network) )
             f.write( "\n\n"+str(self.optimiser) )
+            f.write( "\n" ) ## One line for whitespace
 
         ## Save the loss history, with epoch times, and a png of the graph
         hist_array = np.transpose( np.vstack(( self.trn_hist, self.vld_hist, self.tim_hist )) )
         np.savetxt( Path( full_name, "train_hist.csv" ), hist_array )
         self.loss_plot.save( self.trn_hist, self.vld_hist, Path( full_name, "loss.png" ) )
-
-        ## Save the performance of the network (not for the best! that happens at end of training loop!)
-        if flag != "best":
-            self.save_perf(flag)
 
         ## Save a copy of the stat file in the network directory (only on the first iteration)
         if self.epochs_trained==1:
@@ -320,3 +248,103 @@ class METNET_Agent(object):
         self.vld_hist = previous_data[:,1].tolist()
         self.tim_hist = previous_data[:,2].tolist()
         self.epochs_trained = len(self.trn_hist)
+
+    def save_best_perf( self ):
+        print("\nSaving additional information and performance using best network")
+
+        ## If we are saving the best version of the network, we must make sure that it is loaded!
+        model_name = Path( self.save_dir, self.name, "models", "net_best" )
+        self.network.load_state_dict( T.load( model_name ) )
+
+        ## Calculating performance will require un-normalising our outputs, so we need the stats
+        stats = np.loadtxt(self.stat_file, skiprows=1, delimiter=",")
+        means = T.from_numpy(stats[0,-2:]).to(self.network.device) ## Just need the target (True EX, EY) stats
+        devs  = T.from_numpy(stats[1,-2:]).to(self.network.device)
+
+        ## The performance metrics to be calculated are stored in a running total matrix
+        run_totals = np.zeros( (self.n_bins+1, 5) ) ## Nbins (incl totals), Loss, Res, Ang, DLin
+
+        ## Iterate through the validation set
+        with T.no_grad():
+            self.network.eval()
+            for (inputs, targets) in tqdm( self.valid_loader, desc="Performance", ncols=80, unit="" ):
+
+                ## Pass the information through the network
+                inputs = inputs.to(self.network.device)
+                targets = targets.to(self.network.device)
+                outputs = self.network( inputs )
+
+                ## Un-normalise the outputs and the targets
+                real_outp = ( outputs*devs + means ) / 1000 ## Convert to GeV (Dont like big numbers)
+                real_targ = ( targets*devs + means ) / 1000
+
+                ## Calculate the magnitudes of the vectors
+                targ_mag = T.norm(real_targ, dim=1)
+                outp_mag = T.norm(real_outp, dim=1)
+
+                ## Get the bin numbers from the true met magnitude
+                bins = T.clamp( targ_mag // (self.bin_max/self.n_bins), 0, self.n_bins-1 ).int().cpu().numpy()
+
+                ## Calculate the batch totals
+                batch_totals = T.zeros( ( len(inputs), 5 ) )
+                dot = T.sum( real_outp * real_targ, dim=1 ) / ( outp_mag * targ_mag + 1e-4 )
+
+                batch_totals[:, 0] = T.ones_like(targ_mag)                                            ## Ones for counting bins
+                batch_totals[:, 1] = F.smooth_l1_loss(outputs, targets, reduction="none").sum(axis=1) ## Loss
+                batch_totals[:, 2] = ( outp_mag - targ_mag )**2                                       ## Resolution
+                batch_totals[:, 3] = T.acos( dot )**2                                                 ## Angular resolution
+                batch_totals[:, 4] = ( outp_mag - targ_mag ) / ( targ_mag + 1e-4 )                    ## Deviation from Linearity
+
+                ## Fill in running data by, summing over each bin, bin 0 is reserved for totals
+                for b in range(self.n_bins):
+                    run_totals[b+1] += batch_totals[ bins==b ].sum(axis=0).cpu().numpy()
+                break
+
+        ## Include the totals over the whole dataset by summing and placing it in the first location
+        run_totals[0] = run_totals.sum(axis=0, keepdims=True)
+
+        ## Turn the totals into means or RMSE values
+        run_totals[:,1] = run_totals[:,1] / run_totals[:,0]
+        run_totals[:,2] = np.sqrt( run_totals[:,2] / run_totals[:,0] )
+        run_totals[:,3] = np.sqrt( run_totals[:,3] / run_totals[:,0] )
+        run_totals[:,4] = run_totals[:,4] / run_totals[:,0]
+
+        ## Flatten the metrics and drop the number of events in each bin
+        metrics = run_totals[:,1:].flatten(order='F')
+        metrics = np.expand_dims(metrics, 0)
+
+        ## Getting the names of the columns
+        cols = []
+        for met in [ "Loss", "Res", "DLin", "Ang" ]:
+            cols += [ met+str(i) for i in range(-1, self.n_bins) ]
+
+        ## Write the dataframe to the csv
+        fnm = Path( self.save_dir, self.name, "perf.csv" )
+        df = pd.DataFrame( data=metrics, index=[self.name], columns=cols )
+        df = pd.concat( [ df, self.get_info() ], axis=1 ) ## Combine the performance dataframe with info on the network
+        df.to_csv( fnm, mode="w" )
+
+    def get_info(self):
+        """ This function is used to return preselected information about the network and
+            the training using the class attributes. It returns a dataframe.
+        """
+        columns = [ "do_rot",
+                    "valid_frac",
+                    "batch_size",
+                    "n_train_files",
+                    "n_valid_files",
+                    "train_size",
+                    "valid_size",
+                    "act",
+                    "depth",
+                    "width",
+                    "skips",
+                    "nrm",
+                    "drpt",
+                    "loss_fn",
+                    "lr",
+                    "clip_grad",
+                    "epochs_trained",
+                    "best_epoch" ]
+        data = [[ self.__dict__[c] for c in columns ]]
+        return pd.DataFrame(data=data, index=[self.name], columns=columns)

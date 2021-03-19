@@ -14,11 +14,12 @@ class loss_plot(object):
         self.tst_line, = self.ax.plot( [], "-g", label="Test" )
 
     def _update(self, trn_data, tst_data):
+        if len(trn_data)<2:
+            return 0
 
         x_data = np.arange(len(trn_data))
-
-        self.trn_line.set_data( x_data, trn_data )
-        self.tst_line.set_data( x_data, tst_data )
+        self.trn_line.set_data( x_data[1:], trn_data[1:] )
+        self.tst_line.set_data( x_data[1:], tst_data[1:] )
 
         self.ax.relim()
         self.ax.autoscale_view()

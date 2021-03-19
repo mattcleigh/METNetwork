@@ -1,16 +1,20 @@
-import glob
 import h5py
 import numpy as np
-import numpy.random as rd
+
+from tqdm import tqdm
+from pathlib import Path
 from itertools import count
 
 import torch as T
 from torch.utils.data import IterableDataset
 
+def chunk_given_size(a, size):
+    return np.split(a, np.arange(size,len(a),size))
+
 def buildTrainAndValidation( data_dir, test_frac ):
 
     ## Search the directory for HDF files
-    file_list = np.array( glob.glob( data_dir + "*.h5" ) )
+    file_list = [f for f in data_dir.glob("*.h5")]
 
     ## Exit if no files can be found
     if len(file_list) == 0:
@@ -27,15 +31,19 @@ def buildTrainAndValidation( data_dir, test_frac ):
 
 class METDataset(IterableDataset):
     def __init__(self, file_list, n_ofiles, chnk_size):
+
+        ## Make attributes from all arguments
         self.file_list = file_list
         self.n_ofiles  = n_ofiles
         self.chnk_size = chnk_size
 
         ## Calculate the number of samples in the dataset set
         self.n_samples = 0
-        for file in self.file_list:
-            with h5py.File( file, 'r' ) as hf:
-                self.n_samples += len(hf["data/table"])
+        for file in tqdm( self.file_list, desc="Collecting Files", ncols=80, unit="" ):
+            hf = h5py.File( file, 'r' )
+            file_len = len(hf["data/table"])
+            hf.close()
+            self.n_samples += file_len
 
     def __len__(self):
         return self.n_samples
@@ -63,9 +71,7 @@ class METDataset(IterableDataset):
             worker_files = np.array_split( self.file_list, n_wrks )[wrk_id]
 
         ## Further partition the worker's file list into the ones open at a time
-        ofiles_list = []
-        for i in range( -( - len(worker_files) // self.n_ofiles ) ): ## Divide into chunks + round up
-            ofiles_list.append( worker_files[ i * self.n_ofiles : (i + 1) * self.n_ofiles] )
+        ofiles_list = chunk_given_size( worker_files, self.n_ofiles )
 
         ## We iterate through the open files collection
         for ofiles in ofiles_list:
@@ -80,21 +86,20 @@ class METDataset(IterableDataset):
                 if buffer is None:
                     break
 
-                ## Iterate through the buffer
+                ## Iterate through the batches taken from the buffer
                 for sample in buffer:
 
                     ## Get the MLP input and target variables
                     inputs = sample[:-2]
                     targets = sample[-2:]
-                    yield inputs, targets
 
-        return 0
+                    yield inputs, targets
 
     def load_chunks(self, files, c_count):
 
         ## Work out the bounds of the new chunk
         start = c_count * self.chnk_size
-        end = start + self.chnk_size
+        end   = start + self.chnk_size
 
         ## Get a chunk from each file
         buffer = []
