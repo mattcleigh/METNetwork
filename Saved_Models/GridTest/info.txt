@@ -1,0 +1,65 @@
+save_dir        = Saved_Models
+name            = GridTest
+n_bins          = 10
+bin_max         = 400
+data_dir        = ../Data/Raw
+do_rot          = False
+valid_frac      = 0.05
+n_ofiles        = 32
+chnk_size       = 2048
+batch_size      = 256
+n_workers       = 2
+stat_file       = ../Data/Raw/stats.csv
+n_train_files   = 66
+n_valid_files   = 4
+train_size      = 5159971
+valid_size      = 300029
+act             = LeakyReLU(negative_slope=0.1)
+depth           = 2
+width           = 24
+skips           = 1
+nrm             = False
+drpt            = 0.0
+loss_fn         = SmoothL1Loss()
+lr              = 0.001
+clip_grad       = 0
+trn_hist        = 0.4323028326034546
+vld_hist        = 0.40618157386779785
+tim_hist        = 0.5904326438903809
+epochs_trained  = 1
+max_epochs      = 1
+patience        = 5
+sv_every        = 5
+best_epoch      = 1
+
+
+MET_MLP(
+  (mlp): Sequential(
+    (0): mlp_block(
+      (_): Sequential(
+        (0): Linear(in_features=76, out_features=24, bias=True)
+        (1): LeakyReLU(negative_slope=0.1)
+      )
+    )
+    (1): res_mlp_block(
+      (_): Sequential(
+        (0): Linear(in_features=24, out_features=24, bias=True)
+        (1): LeakyReLU(negative_slope=0.1)
+      )
+    )
+    (2): mlp_block(
+      (_): Sequential(
+        (0): Linear(in_features=24, out_features=2, bias=True)
+      )
+    )
+  )
+)
+
+Adam (
+Parameter Group 0
+    amsgrad: False
+    betas: (0.9, 0.999)
+    eps: 1e-08
+    lr: 0.001
+    weight_decay: 0
+)

@@ -62,11 +62,11 @@ def main():
     model = Model.METNET_Agent( name = args.name, save_dir = "Saved_Models" )
 
     ## Load up the dataset
-    model.setup_dataset( data_dir   = "/mnt/scratch/Data/",
+    model.setup_dataset( data_dir   = "../Data/",
                          do_rot     = args.do_rot,
                          valid_frac = 5e-2,
                          n_ofiles   = 32, chnk_size = 2048,
-                         batch_size = bsize, n_workers = 2 )
+                         batch_size = args.bsize, n_workers = 2 )
 
     ## Initialise the prepost-MLP network
     model.setup_network( act = nn.LeakyReLU(0.1),

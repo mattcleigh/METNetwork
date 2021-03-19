@@ -302,6 +302,7 @@ class METNET_Agent(object):
 
         ## Include the totals over the whole dataset by summing and placing it in the first location
         run_totals[0] = run_totals.sum(axis=0, keepdims=True)
+        run_totals[:,0] = np.clip( run_totals[:,0], 1, None ) ## Just incase some of the bins were empty
 
         ## Turn the totals into means or RMSE values
         run_totals[:,1] = run_totals[:,1] / run_totals[:,0]
