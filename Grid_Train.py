@@ -1,5 +1,5 @@
-from Resources import Model
 import argparse
+from Resources import Model
 import torch.nn as nn
 
 def str2bool(v):
@@ -15,6 +15,11 @@ def get_args():
     parser.add_argument( "--name",
                          type = str,
                          help = "The name to use for saving the network",
+                         required = True )
+
+    parser.add_argument( "--data_dir",
+                         type = str,
+                         help = "The folder containing the Raw and Rotated datasets",
                          required = True )
 
     parser.add_argument( "--do_rot",
@@ -55,18 +60,18 @@ def get_args():
     return parser.parse_args()
 
 def main():
-
     args = get_args()
+    print("Running job with options:\n{}".format(args))
 
     ## Initialise the model
     model = Model.METNET_Agent( name = args.name, save_dir = "Saved_Models" )
 
     ## Load up the dataset
-    model.setup_dataset( data_dir   = "../Data/",
+    model.setup_dataset( data_dir   = args.data_dir,
                          do_rot     = args.do_rot,
                          valid_frac = 5e-2,
                          n_ofiles   = 32, chnk_size = 2048,
-                         batch_size = args.bsize, n_workers = 2 )
+                         batch_size = args.bsize, n_workers = 3 )
 
     ## Initialise the prepost-MLP network
     model.setup_network( act = nn.LeakyReLU(0.1),
@@ -79,7 +84,7 @@ def main():
                           clip_grad = 0 )
 
     ## Run the training loop
-    model.run_training_loop( max_epochs = 1, patience = 5, sv_every = 5 )
+    model.run_training_loop( max_epochs = 10, patience = 4, sv_every = 11 )
 
     ## Save some prformance metrics using the best version of the network
     model.save_best_perf()

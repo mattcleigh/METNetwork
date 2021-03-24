@@ -115,7 +115,6 @@ class METNET_Agent(object):
 
             ## Update the running loss
             running_loss += loss.item()
-            break
 
         ## Update loss history and epoch counter
         self.trn_hist.append( running_loss / (i+1) ) ## Divide by i as we dont include final batches
@@ -134,7 +133,6 @@ class METNET_Agent(object):
                 outputs = self.network( inputs )
                 loss = self.loss_fn( outputs, targets )
                 running_loss += loss.item()
-                break
             self.vld_hist.append( running_loss / (i+1) ) ## Divide by i as we dont include final batches
 
     def run_training_loop( self, max_epochs = 10, patience = 20, sv_every = 20 ):
@@ -169,18 +167,15 @@ class METNET_Agent(object):
 
             ## Calculate the number of bad epochs
             self.best_epoch = np.argmin(self.vld_hist) + 1
-            bad_epochs = len(self.vld_hist) - self.best_epoch
+            self.bad_epochs = len(self.vld_hist) - self.best_epoch
 
-            ## Saving a network checkpoint
-            if self.epochs_trained%sv_every == 0:
-                self.save( str(self.epochs_trained) )
+            ## At the end of every epoch we save something, even if it is just logging
+            self.save()
 
-            ## Checking if we have exceeded patience
-            if bad_epochs == 0:
-                self.save( "best" )
-            else:
+            ## We check if we have exceeded the patience
+            if self.bad_epochs > 0:
                 print( "Bad Epoch Number: {:}".format( bad_epochs ) )
-                if bad_epochs > patience:
+                if self.bad_epochs > patience:
                     print( "Patience Exceeded: Stopping training!" )
                     return 0
 
@@ -196,6 +191,14 @@ class METNET_Agent(object):
             - stat.csv -> Values used to normalise the data for the network
         """
 
+        ## We work out the flag for saving, either "best", "chkpnt", "none"
+        if self.bad_epochs==0:
+            flag = "best"
+        elif self.epochs_trained%self.sv_every==0:
+            flag = str(self.epochs_trained)
+        else:
+            flag = "none"
+
         ## The full name of the save directory
         full_name = Path( self.save_dir, self.name )
 
@@ -206,13 +209,14 @@ class METNET_Agent(object):
                 shutil.rmtree(full_name)
         full_name.mkdir(parents=True, exist_ok=True)
 
-        ## Save the network and optimiser tensors
-        model_folder = Path( full_name, "models" )
-        model_folder.mkdir(parents=True, exist_ok=True)
-        T.save( self.network.state_dict(),   Path( model_folder, "net_"+flag ) )
-        T.save( self.optimiser.state_dict(), Path( model_folder, "opt_"+flag ) )
+        ## Save the network and optimiser tensors: Only for "best" and "chkpnt"!
+        if flag != "none":
+            model_folder = Path( full_name, "models" )
+            model_folder.mkdir(parents=True, exist_ok=True)
+            T.save( self.network.state_dict(),   Path( model_folder, "net_"+flag ) )
+            T.save( self.optimiser.state_dict(), Path( model_folder, "opt_"+flag ) )
 
-        ## Save a file containing the network setup and description (based on class dict)
+        ## Save a file containing the network setup and description (based on class dict): All flags!
         with open( Path( full_name, "info.txt" ), 'w' ) as f:
             for key in self.__dict__:
                 attr = self.__dict__[key]                   ## Information here is more inclusive than get_info below
@@ -223,12 +227,12 @@ class METNET_Agent(object):
             f.write( "\n\n"+str(self.optimiser) )
             f.write( "\n" ) ## One line for whitespace
 
-        ## Save the loss history, with epoch times, and a png of the graph
+        ## Save the loss history, with epoch times, and a png of the graph: All flags!
         hist_array = np.transpose( np.vstack(( self.trn_hist, self.vld_hist, self.tim_hist )) )
         np.savetxt( Path( full_name, "train_hist.csv" ), hist_array )
         self.loss_plot.save( self.trn_hist, self.vld_hist, Path( full_name, "loss.png" ) )
 
-        ## Save a copy of the stat file in the network directory (only on the first iteration)
+        ## Save a copy of the stat file in the network directory: Only on the first iteration!
         if self.epochs_trained==1:
             shutil.copyfile( self.stat_file, Path( full_name, "stat.csv") )
 
@@ -298,11 +302,10 @@ class METNET_Agent(object):
                 ## Fill in running data by, summing over each bin, bin 0 is reserved for totals
                 for b in range(self.n_bins):
                     run_totals[b+1] += batch_totals[ bins==b ].sum(axis=0).cpu().numpy()
-                break
 
         ## Include the totals over the whole dataset by summing and placing it in the first location
         run_totals[0] = run_totals.sum(axis=0, keepdims=True)
-        run_totals[:,0] = np.clip( run_totals[:,0], 1, None ) ## Just incase some of the bins were empty
+        run_totals[:,0] = np.clip( run_totals[:,0], 1, None ) ## Just incase some of the bins were empty, dont wana divide by 0
 
         ## Turn the totals into means or RMSE values
         run_totals[:,1] = run_totals[:,1] / run_totals[:,0]
@@ -316,7 +319,7 @@ class METNET_Agent(object):
 
         ## Getting the names of the columns
         cols = []
-        for met in [ "Loss", "Res", "DLin", "Ang" ]:
+        for met in [ "Loss", "Res", "Ang", "DLin" ]:
             cols += [ met+str(i) for i in range(-1, self.n_bins) ]
 
         ## Write the dataframe to the csv
