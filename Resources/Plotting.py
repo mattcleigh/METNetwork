@@ -59,7 +59,7 @@ def parallel_plot(df,cols,rank_attr,cmap='Spectral',spread=None,curved=False,cur
     ax_info = {}
     for i,col in enumerate(cols):
         vals = df[col]
-        if (vals.dtype == float) & (len(np.unique(vals)) > 20):
+        if (vals.dtype == float) & (len(np.unique(vals)) > 10):
             minval = np.min(vals)
             maxval = np.max(vals)
             rangeval = maxval - minval
@@ -115,11 +115,13 @@ def parallel_plot(df,cols,rank_attr,cmap='Spectral',spread=None,curved=False,cur
         cbar.ax.set_ylim(0-curvedextend,1+curvedextend)
 
     ## Chenge the plot labels to be the configuration, not value
-    labels = [ str(row) for row in df[cols[:-2]].values.tolist() ]
+    labels = [ str(row) for row in df[cols[:-3]].values.tolist() ]
     if len(labels) > 10:
         labels = ax_info[rank_attr][0]
     cbar.ax.set_yticklabels(labels)
     cbar.ax.set_xlabel(rank_attr)
+    plt.tight_layout()
+    plt.subplots_adjust(wspace=0, left=0.05, right=0.85)
     plt.show()
 
     return x,valmat

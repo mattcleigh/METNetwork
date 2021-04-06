@@ -1,12 +1,18 @@
 import time
 import shutil
 import argparse
+import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+
 from pathlib import Path
+from scipy.interpolate import interp1d
 
 import dask
 import dask.array as da
 import dask.dataframe as dd
+from dask.diagnostics import ProgressBar
+ProgressBar().register()
 
 def str2bool(v):
     if isinstance(v, bool): return v
@@ -31,7 +37,12 @@ def get_args():
     parser.add_argument( "--do_rot",
                          type = str2bool,
                          help = "Perform rotations using \"Tight_Phi\"",
-                         required = True )
+                         default = True )
+
+    parser.add_argument( "--do_weight",
+                         type = str2bool,
+                         help = "Calculate the weight of each sample based on the True ET distribution",
+                         default = True )
 
     return parser.parse_args()
 
@@ -51,6 +62,33 @@ def main():
     ## Read all csv files in the input folder into a dask dataframe (set blocksize to 64Mb)
     df = dd.read_csv( args.input_dir + "*.csv", assume_missing=True, blocksize=64e6 ) ## Missing means that 0 is a float
     col_names = list(df.columns)
+
+    if args.do_weight:
+
+        ## Some constants about the histogram
+        h_min  = 1e3
+        h_max  = 3e5
+        n_bins = 100
+
+        ## Create the histogram based on true magnitude of the dataset
+        mags = da.sqrt(df["True_EX"]**2 + df["True_EY"]**2)
+        hist, bins = da.histogram(mags, bins=n_bins, range=[h_min, h_max] )
+        mid_bins = ( bins[:-1] + bins[1:] ) / 2
+        hist = hist.compute()
+
+        ## Interpolate and calculate weight using reciprocal of bin height
+        interp = interp1d( mid_bins, hist, kind="cubic", bounds_error=False, fill_value=tuple(hist[[0,-1]]) )
+        weight = mags.apply( interp, meta="float32" )
+        weight = interp(1.5e5) / weight ## We use the height at 150 GeV to make the numbers fit in a reasonable scale
+
+        ## Save the histogram and weight values as an image and a csv
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize = (8,5) )
+        weight_line = interp(1.5e5) / interp(mid_bins)
+        ax1.step( mid_bins, hist, where = "mid" )
+        ax2.plot( mid_bins, weight_line )
+        fig.savefig( Path( output_path, "hist.png" ) )
+        np.savetxt(  Path( output_path, "hist.csv" ),   np.vstack((mid_bins, hist)).T, delimiter="," )
+        np.savetxt(  Path( output_path, "weights.csv" ), np.vstack((mid_bins, weight_line)).T, delimiter="," )
 
     if args.do_rot:
 
@@ -97,15 +135,23 @@ def main():
     col_names.remove("Tight_Phi")
     col_names.remove("DSID")
 
-    ## Calculate the mean and deviation on the dataset and convert to an array (we need to calculate now!)
+    ## Calculate the mean and deviation on the dataset and convert to an array
+    ## We need to calculate now or face memory issues!
     mean = df.mean(axis=0).compute()
     sdev = df.std(axis=0).compute()
 
-    ## Normalise the dataframe (for some reason the column orders change?), also cast to float
+    ## Normalise the dataframe
     normed = (df - mean) / (sdev+1e-6)
+
+    ## After normalisation can add the weights back in (otherwise the weights would have been normed)
+    if args.do_weight:
+        normed["Weight"] = weight
+        col_names += ["Weight"]
+
+    ## The column orders change when we normalise (?), we fix this and also cast to float
     normed = normed[col_names].astype("float32")
 
-    ## Save the normalised dataframe to HDF files using the data table (cast to float)
+    ## Save the normalised dataframe to HDF files using the data table
     normed.to_hdf( Path( output_path, "sample-*.h5" ), "/data", mode="w" )
 
     ## Package and save the stats together

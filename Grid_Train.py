@@ -22,9 +22,19 @@ def get_args():
                          help = "The folder containing the Raw and Rotated datasets",
                          required = True )
 
+    parser.add_argument( "--net_dir",
+                         type = str,
+                         help = "The output folder containing the saved networks",
+                         required = True )
+
     parser.add_argument( "--do_rot",
                          type = str2bool,
                          help = "Whether to use a pre-rotated dataset",
+                         required = True )
+
+    parser.add_argument( "--weight_to",
+                         type = float,
+                         help = "The location of the falling edge of the plateau in MeV",
                          required = True )
 
     parser.add_argument( "--bsize",
@@ -59,19 +69,49 @@ def get_args():
 
     return parser.parse_args()
 
+def print_args( args ):
+    print("\nRunning job with options:")
+    for key, value in vars(args).items():
+        print( " - {:10}: {}".format(key, value))
+    print("")
+
+def pass_blacklist( args ):
+
+    blacklist = [
+                    # ( "depth", 5,   "width", 256 ),
+                    # ( "skips", 0,   "width", 256 ),
+                    # ( "nrm", False, "lr", 1e-3 ),
+    ]
+
+    for a1, v1, a2, v2 in blacklist:
+        if getattr(args, a1) == v1 and getattr(args, a2) == v2:
+            print( "Argument combination is on the blacklist!" )
+            print( "---> ( {} = {} ) and ( {} = {} )".format(a1, v1, a2, v2) )
+            return False
+    return True
+
+# python Grid_Train.py --data_dir ../Data/ --net_dir Saved_Models --name GridTest --do_rot True --weight_to 2e5 --bsize 512 --depth 9 --width 256 --skips 2 --nrm True --lr 1e-3
+
 def main():
+
+    ## Get and print the arguments
     args = get_args()
-    print("Running job with options:\n{}".format(args))
+    print_args( args )
+
+    ## Discard blacklisted argument matches
+    if not pass_blacklist( args ):
+        return 0
 
     ## Initialise the model
-    model = Model.METNET_Agent( name = args.name, save_dir = "Saved_Models" )
+    model = Model.METNET_Agent( name = args.name, save_dir = args.net_dir )
 
     ## Load up the dataset
     model.setup_dataset( data_dir   = args.data_dir,
                          do_rot     = args.do_rot,
-                         valid_frac = 5e-2,
-                         n_ofiles   = 32, chnk_size = 2048,
-                         batch_size = args.bsize, n_workers = 3 )
+                         weight_to  = args.weight_to,
+                         valid_frac = 1e-1,
+                         n_ofiles   = 6, chnk_size = 2048,
+                         batch_size = args.bsize, n_workers = 4 )
 
     ## Initialise the prepost-MLP network
     model.setup_network( act = nn.LeakyReLU(0.1),
@@ -84,10 +124,7 @@ def main():
                           clip_grad = 0 )
 
     ## Run the training loop
-    model.run_training_loop( max_epochs = 10, patience = 4, sv_every = 11 )
-
-    ## Save some prformance metrics using the best version of the network
-    model.save_best_perf()
+    model.run_training_loop( max_epochs = 1000, patience = 10, sv_every = 100 )
 
 if __name__ == '__main__':
     main()

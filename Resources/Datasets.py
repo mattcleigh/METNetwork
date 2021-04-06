@@ -1,4 +1,5 @@
 import h5py
+import random
 import numpy as np
 
 from tqdm import tqdm
@@ -21,8 +22,12 @@ def buildTrainAndValidation( data_dir, test_frac ):
         print("No files could be found with the search tag: ", data_dir, "*.h5" )
         exit()
 
+    ## Shuffle with the a set random seed
+    np.random.seed(0)
+    np.random.shuffle(file_list)
+
     ## Split the file list according to the test_frac
-    n_test  = int( len(file_list) * test_frac + 0.5 )
+    n_test  = np.clip( int(round(len(file_list)*test_frac)), 1, len(file_list)-1 )
     n_train = len(file_list) - n_test
     train_files = file_list[:-n_test]
     test_files  = file_list[-n_test:]
@@ -30,12 +35,14 @@ def buildTrainAndValidation( data_dir, test_frac ):
     return train_files, test_files
 
 class METDataset(IterableDataset):
-    def __init__(self, file_list, n_ofiles, chnk_size):
+    def __init__(self, file_list, n_ofiles, chnk_size, weight_to):
 
         ## Make attributes from all arguments
-        self.file_list = file_list
-        self.n_ofiles  = n_ofiles
-        self.chnk_size = chnk_size
+        self.file_list  = file_list
+        self.n_ofiles   = n_ofiles
+        self.chnk_size  = chnk_size
+        self.weight_to  = weight_to
+        self.do_weights = True if weight_to > 0 else False
 
         ## Calculate the number of samples in the dataset set
         self.n_samples = 0
@@ -90,10 +97,13 @@ class METDataset(IterableDataset):
                 for sample in buffer:
 
                     ## Get the MLP input and target variables
-                    inputs = sample[:-2]
-                    targets = sample[-2:]
+                    inputs  = sample[:-3]
+                    targets = sample[-3:-1]
+                    weight  = sample[-1]
 
-                    yield inputs, targets
+                    ## We return the sample if the weights allow it (or statements are short circuted)
+                    if not self.do_weights or weight > self.weight_to or self.weight_to*random.random() < weight:
+                        yield inputs, targets
 
     def load_chunks(self, files, c_count):
 
@@ -126,3 +136,9 @@ class METDataset(IterableDataset):
     def shuffle_files(self):
         ## We shuffle the file list, this is called at the end of each epoch
         np.random.shuffle( self.file_list )
+
+    def weight_on(self):
+        self.do_weights = True
+
+    def weight_off(self):
+        self.do_weights = False

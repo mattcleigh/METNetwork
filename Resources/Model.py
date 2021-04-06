@@ -28,7 +28,7 @@ class METNET_Agent(object):
         self.n_bins = 10
         self.bin_max = 400
 
-    def setup_dataset( self, data_dir, do_rot, valid_frac, n_ofiles, chnk_size, batch_size, n_workers ):
+    def setup_dataset( self, data_dir, do_rot, weight_to, valid_frac, n_ofiles, chnk_size, batch_size, n_workers ):
         """ Uses a pytorch dataloader to get the training and validation sets
         """
         ## Update our information dictionary
@@ -38,16 +38,23 @@ class METNET_Agent(object):
         self.data_dir  = Path( self.data_dir, "Rotated" if do_rot else "Raw" )
         self.stat_file = Path( self.data_dir, "stats.csv" )
 
+        ## We read the weight file to get the max value of the weights
+        max_weight = 0
+        if weight_to > 0:
+            weight_file = Path( self.data_dir, "weights.csv" )
+            weights = np.loadtxt(weight_file, delimiter=",")
+            max_weight = weights[ (np.abs(weights[:,0] - weight_to)).argmin(), 1 ]
+
         ## Build the list of files that will be used in the train and validation set
         train_files, valid_files = myDS.buildTrainAndValidation( self.data_dir, valid_frac )
         self.n_train_files = len(train_files)
         self.n_valid_files = len(valid_files)
 
         ## Get the defined iterable dataset objects
-        train_set = myDS.METDataset( train_files, n_ofiles, chnk_size )
-        valid_set = myDS.METDataset( valid_files, n_ofiles, chnk_size )
+        train_set = myDS.METDataset( train_files, n_ofiles, chnk_size, max_weight )
+        valid_set = myDS.METDataset( valid_files, n_ofiles, chnk_size, max_weight )
 
-        ## Create the pytorch dataloaders with num_workers accounting for low numbers of files
+        ## Create the pytorch dataloaders with num_workers accounting for low numbers of files, drop last beacuse might lead to btch of 1 (errors!)
         self.train_loader = DataLoader( train_set, batch_size=batch_size, drop_last=True, num_workers=min(self.n_train_files, n_workers) )
         self.valid_loader = DataLoader( valid_set, batch_size=batch_size, drop_last=True, num_workers=min(self.n_valid_files, n_workers) )
 
@@ -172,9 +179,9 @@ class METNET_Agent(object):
             ## At the end of every epoch we save something, even if it is just logging
             self.save()
 
-            ## We check if we have exceeded the patience
+            ## If the validation loss did not decrease, we check if we have exceeded the patience
             if self.bad_epochs > 0:
-                print( "Bad Epoch Number: {:}".format( bad_epochs ) )
+                print( "Bad Epoch Number: {:}".format( self.bad_epochs ) )
                 if self.bad_epochs > patience:
                     print( "Patience Exceeded: Stopping training!" )
                     return 0
@@ -182,22 +189,20 @@ class METNET_Agent(object):
         print( "\nMax number of epochs completed!" )
         return 0
 
-    def save( self, flag ):
+    def save( self ):
         """
         Creates a save directory that includes the following
             - models   -> A folder containing the network and optimiser versions
             - info.txt -> A file containing the network setup and description
             - loss.csv -> Hitory of the train + validation losses (with png)
             - stat.csv -> Values used to normalise the data for the network
+            - perf.csv -> Performance metrics on the validation set for the best network
         """
 
-        ## We work out the flag for saving, either "best", "chkpnt", "none"
-        if self.bad_epochs==0:
-            flag = "best"
-        elif self.epochs_trained%self.sv_every==0:
-            flag = str(self.epochs_trained)
-        else:
-            flag = "none"
+        ## We work out the flag for saving the pytorch model files, either "best" or "chkpnt"
+        model_flags = []
+        if self.bad_epochs==0: model_flags.append( "best" )
+        if self.epochs_trained%self.sv_every==0: model_flags.append( str(self.epochs_trained) )
 
         ## The full name of the save directory
         full_name = Path( self.save_dir, self.name )
@@ -209,14 +214,14 @@ class METNET_Agent(object):
                 shutil.rmtree(full_name)
         full_name.mkdir(parents=True, exist_ok=True)
 
-        ## Save the network and optimiser tensors: Only for "best" and "chkpnt"!
-        if flag != "none":
+        ## Save the network and optimiser tensors for the best and checkpoint versions
+        for flag in model_flags:
             model_folder = Path( full_name, "models" )
             model_folder.mkdir(parents=True, exist_ok=True)
             T.save( self.network.state_dict(),   Path( model_folder, "net_"+flag ) )
             T.save( self.optimiser.state_dict(), Path( model_folder, "opt_"+flag ) )
 
-        ## Save a file containing the network setup and description (based on class dict): All flags!
+        ## Save a file containing the network setup and description (based on class dict)
         with open( Path( full_name, "info.txt" ), 'w' ) as f:
             for key in self.__dict__:
                 attr = self.__dict__[key]                   ## Information here is more inclusive than get_info below
@@ -227,7 +232,7 @@ class METNET_Agent(object):
             f.write( "\n\n"+str(self.optimiser) )
             f.write( "\n" ) ## One line for whitespace
 
-        ## Save the loss history, with epoch times, and a png of the graph: All flags!
+        ## Save the loss history, with epoch times, and a png of the graph
         hist_array = np.transpose( np.vstack(( self.trn_hist, self.vld_hist, self.tim_hist )) )
         np.savetxt( Path( full_name, "train_hist.csv" ), hist_array )
         self.loss_plot.save( self.trn_hist, self.vld_hist, Path( full_name, "loss.png" ) )
@@ -235,6 +240,10 @@ class METNET_Agent(object):
         ## Save a copy of the stat file in the network directory: Only on the first iteration!
         if self.epochs_trained==1:
             shutil.copyfile( self.stat_file, Path( full_name, "stat.csv") )
+
+        ## If the network is the best, then we also save the performance file
+        if self.bad_epochs==0:
+            self.save_best_perf()
 
     def load( self, flag ):
 
@@ -251,14 +260,11 @@ class METNET_Agent(object):
         self.trn_hist = previous_data[:,0].tolist()
         self.vld_hist = previous_data[:,1].tolist()
         self.tim_hist = previous_data[:,2].tolist()
+        self.best_epoch = np.argmin(self.vld_hist) + 1
         self.epochs_trained = len(self.trn_hist)
 
     def save_best_perf( self ):
-        print("\nSaving additional information and performance using best network")
-
-        ## If we are saving the best version of the network, we must make sure that it is loaded!
-        model_name = Path( self.save_dir, self.name, "models", "net_best" )
-        self.network.load_state_dict( T.load( model_name ) )
+        print("\nImprovement detected! Saving additional information")
 
         ## Calculating performance will require un-normalising our outputs, so we need the stats
         stats = np.loadtxt(self.stat_file, skiprows=1, delimiter=",")
@@ -266,10 +272,12 @@ class METNET_Agent(object):
         devs  = T.from_numpy(stats[1,-2:]).to(self.network.device)
 
         ## The performance metrics to be calculated are stored in a running total matrix
-        run_totals = np.zeros( (self.n_bins+1, 5) ) ## Nbins (incl totals), Loss, Res, Ang, DLin
+        run_totals = np.zeros( (self.n_bins+1, 5) ) ## (Nbins + total column) x (bins_counts + metrics)
+        met_names  = [ "Loss", "Res", "Ang", "DLin" ]
 
-        ## Iterate through the validation set
+        ## Iterate through the validation set (WITHOUT DOWNSAMPLING!)
         with T.no_grad():
+            self.valid_loader.dataset.weight_off()
             self.network.eval()
             for (inputs, targets) in tqdm( self.valid_loader, desc="Performance", ncols=80, unit="" ):
 
@@ -287,9 +295,9 @@ class METNET_Agent(object):
                 outp_mag = T.norm(real_outp, dim=1)
 
                 ## Get the bin numbers from the true met magnitude
-                bins = T.clamp( targ_mag // (self.bin_max/self.n_bins), 0, self.n_bins-1 ).int().cpu().numpy()
+                bins = T.clamp( targ_mag / (self.bin_max/self.n_bins), 0, self.n_bins-1 ).int().cpu().numpy()
 
-                ## Calculate the batch totals
+                ## Calculate the batch totals of each metric
                 batch_totals = T.zeros( ( len(inputs), 5 ) )
                 dot = T.sum( real_outp * real_targ, dim=1 ) / ( outp_mag * targ_mag + 1e-4 )
 
@@ -299,7 +307,7 @@ class METNET_Agent(object):
                 batch_totals[:, 3] = T.acos( dot )**2                                                 ## Angular resolution
                 batch_totals[:, 4] = ( outp_mag - targ_mag ) / ( targ_mag + 1e-4 )                    ## Deviation from Linearity
 
-                ## Fill in running data by, summing over each bin, bin 0 is reserved for totals
+                ## Fill in running data by summing over each bin, bin 0 is reserved for dataset totals
                 for b in range(self.n_bins):
                     run_totals[b+1] += batch_totals[ bins==b ].sum(axis=0).cpu().numpy()
 
@@ -319,7 +327,7 @@ class METNET_Agent(object):
 
         ## Getting the names of the columns
         cols = []
-        for met in [ "Loss", "Res", "Ang", "DLin" ]:
+        for met in met_names:
             cols += [ met+str(i) for i in range(-1, self.n_bins) ]
 
         ## Write the dataframe to the csv
@@ -327,6 +335,9 @@ class METNET_Agent(object):
         df = pd.DataFrame( data=metrics, index=[self.name], columns=cols )
         df = pd.concat( [ df, self.get_info() ], axis=1 ) ## Combine the performance dataframe with info on the network
         df.to_csv( fnm, mode="w" )
+
+        ## Turn the sampler back on for the validation set
+        self.valid_loader.dataset.weight_on()
 
     def get_info(self):
         """ This function is used to return preselected information about the network and
