@@ -17,7 +17,7 @@ import torch as T
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, RandomSampler
 
 class METNET_Agent(object):
     def __init__(self, name, save_dir ):
@@ -25,10 +25,10 @@ class METNET_Agent(object):
         self.name = name
 
         ## How to setup the bins for performance metrics
-        self.n_bins = 10
+        self.n_bins = 20
         self.bin_max = 400
 
-    def setup_dataset( self, data_dir, do_rot, weight_to, valid_frac, n_ofiles, chnk_size, batch_size, n_workers ):
+    def setup_dataset( self, data_dir, stream_data, do_rot, weight_to, valid_frac, n_ofiles, chnk_size, batch_size, n_workers ):
         """ Uses a pytorch dataloader to get the training and validation sets
         """
         ## Update our information dictionary
@@ -51,12 +51,26 @@ class METNET_Agent(object):
         self.n_valid_files = len(valid_files)
 
         ## Get the defined iterable dataset objects
-        train_set = myDS.METDataset( train_files, n_ofiles, chnk_size, max_weight )
-        valid_set = myDS.METDataset( valid_files, n_ofiles, chnk_size, max_weight )
+        if stream_data:
+            train_set = myDS.StreamMETDataset( train_files, n_ofiles, chnk_size, max_weight )
+            valid_set = myDS.StreamMETDataset( valid_files, n_ofiles, chnk_size, max_weight )
+        else:
+            train_set = myDS.METDataset( train_files, max_weight )
+            valid_set = myDS.METDataset( valid_files, max_weight )
 
-        ## Create the pytorch dataloaders with num_workers accounting for low numbers of files, drop last beacuse might lead to btch of 1 (errors!)
-        self.train_loader = DataLoader( train_set, batch_size=batch_size, drop_last=True, num_workers=min(self.n_train_files, n_workers) )
-        self.valid_loader = DataLoader( valid_set, batch_size=batch_size, drop_last=True, num_workers=min(self.n_valid_files, n_workers) )
+        ## Create the pytorch dataloaders
+        self.train_loader = DataLoader( train_set,
+                                        drop_last   = True,                                ## Causes errors with batch norm is batch = 1
+                                        batch_size  = batch_size,                          ## Set by training script
+                                        sampler     = train_set.sampler,                   ## Is always None for iterable dataset
+                                        num_workers = min(self.n_train_files, n_workers),  ## Dont want dead workers if not enough files
+                                        pin_memory  = True )                               ## Improves CPU->GPU transfer times
+        self.valid_loader = DataLoader( valid_set,
+                                        drop_last   = True,
+                                        batch_size  = batch_size,
+                                        sampler     = valid_set.sampler,
+                                        num_workers = min(self.n_valid_files, n_workers),
+                                        pin_memory  = True )
 
         ## Report on the number of files/samples used
         self.train_size = len(train_set)
@@ -157,8 +171,8 @@ class METNET_Agent(object):
             e_start_time = time.time()
 
             ## Run the test/train cycle
-            self._test_epoch()
             self._train_epoch()
+            self._test_epoch()
 
             ## Shuffle the file order in the datasets
             self.train_loader.dataset.shuffle_files()
@@ -199,8 +213,8 @@ class METNET_Agent(object):
             - perf.csv -> Performance metrics on the validation set for the best network
         """
 
-        ## We work out the flag for saving the pytorch model files, either "best" or "chkpnt"
-        model_flags = []
+        ## We work out the flags for saving the pytorch model files, "latest", "best" and/or "chkpnt"
+        model_flags = [ "latest" ]
         if self.bad_epochs==0: model_flags.append( "best" )
         if self.epochs_trained%self.sv_every==0: model_flags.append( str(self.epochs_trained) )
 
@@ -243,7 +257,8 @@ class METNET_Agent(object):
 
         ## If the network is the best, then we also save the performance file
         if self.bad_epochs==0:
-            self.save_best_perf()
+            print("\nImprovement detected! Saving additional information")
+            self.save_perf()
 
     def load( self, flag ):
 
@@ -263,8 +278,7 @@ class METNET_Agent(object):
         self.best_epoch = np.argmin(self.vld_hist) + 1
         self.epochs_trained = len(self.trn_hist)
 
-    def save_best_perf( self ):
-        print("\nImprovement detected! Saving additional information")
+    def save_perf( self ):
 
         ## Calculating performance will require un-normalising our outputs, so we need the stats
         stats = np.loadtxt(self.stat_file, skiprows=1, delimiter=",")
@@ -275,9 +289,9 @@ class METNET_Agent(object):
         run_totals = np.zeros( (self.n_bins+1, 5) ) ## (Nbins + total column) x (bins_counts + metrics)
         met_names  = [ "Loss", "Res", "Ang", "DLin" ]
 
-        ## Iterate through the validation set (WITHOUT DOWNSAMPLING!)
+        ## Iterate through the validation set
         with T.no_grad():
-            self.valid_loader.dataset.weight_off()
+            self.valid_loader.dataset.weight_off() ## Turn off weighted sampling!
             self.network.eval()
             for (inputs, targets) in tqdm( self.valid_loader, desc="Performance", ncols=80, unit="" ):
 
@@ -344,6 +358,7 @@ class METNET_Agent(object):
             the training using the class attributes. It returns a dataframe.
         """
         columns = [ "do_rot",
+                    "weight_to",
                     "valid_frac",
                     "batch_size",
                     "n_train_files",

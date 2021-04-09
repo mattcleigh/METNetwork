@@ -104,7 +104,16 @@ def parallel_plot(df,cols,rank_attr,cmap='Spectral',spread=None,curved=False,cur
     for dim, (ax,col) in enumerate(zip(axes,cols)):
         ax.xaxis.set_major_locator(ticker.FixedLocator([dim]))
         ax.yaxis.set_major_locator(ticker.FixedLocator(ax_info[col][1]))
-        ax.set_yticklabels(ax_info[col][0])
+
+        ## Formatting the tick labels to make them readable
+        tick_labels = []
+        for a in ax_info[col][0]:
+            if isinstance(a, float):
+                tick_labels.append("{:.5}".format(a))
+            else:
+                tick_labels.append(a)
+
+        ax.set_yticklabels(tick_labels)
         ax.set_xticklabels([cols[dim]])
 
     plt.subplots_adjust(wspace=0)

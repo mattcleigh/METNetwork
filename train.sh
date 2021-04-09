@@ -1,0 +1,14 @@
+python Train.py \
+  --name        GridTest21 \
+  --save_dir    Saved_Models \
+  --data_dir    ../Data/ \
+  --stream_data False \
+  --do_rot      True \
+  --weight_to   2e5 \
+  --bsize       512 \
+  --n_workers   4 \
+  --depth       9 \
+  --width       256 \
+  --skips       2 \
+  --nrm         False \
+  --lr          1e-4 \

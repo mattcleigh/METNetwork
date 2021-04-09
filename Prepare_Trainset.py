@@ -55,12 +55,12 @@ def main():
     args = get_args()
 
     ## Create the path to the output folder and ensure that it is empty (strange things happen with dask to_hdf if they exist)
-    output_path = Path( args.output_dir, "Rotated" if args.do_rot else "Raw" )
+    output_path = Path( args.output_dir, "Rotated3" if args.do_rot else "Raw" )
     if output_path.exists(): shutil.rmtree(output_path)
     output_path.mkdir(parents=True)
 
     ## Read all csv files in the input folder into a dask dataframe (set blocksize to 64Mb)
-    df = dd.read_csv( args.input_dir + "*.csv", assume_missing=True, blocksize=64e6 ) ## Missing means that 0 is a float
+    df = dd.read_csv( args.input_dir + "*01.*.csv", assume_missing=True, blocksize=64e6 ) ## Missing means that 0 is a float
     col_names = list(df.columns)
 
     if args.do_weight:
@@ -152,7 +152,7 @@ def main():
     normed = normed[col_names].astype("float32")
 
     ## Save the normalised dataframe to HDF files using the data table
-    normed.to_hdf( Path( output_path, "sample-*.h5" ), "/data", mode="w" )
+    normed.to_hdf( Path( output_path, "sample-*.h5" ), "data", mode="w", data_columns=None )
 
     ## Package and save the stats together
     stat_df = pd.concat( [mean, sdev], axis=1 ).transpose()

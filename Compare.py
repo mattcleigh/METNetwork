@@ -5,11 +5,12 @@ from pandas.plotting import parallel_coordinates
 import matplotlib.pyplot as plt
 
 from Resources import Plotting as myPL
-cmap = plt.get_cmap("Spectral")
+spec = "turbo"
+cmap = plt.get_cmap(spec)
 
 def main():
 
-    input_search = "Saved_Models/*/perf.csv"
+    input_search = "../Grid2_Networks/*/perf.csv"
 
     ## Read csv files
     file_list = glob.glob( input_search )
@@ -20,23 +21,26 @@ def main():
     ## Calculate the bias and add it as column
     df["bias"] = np.square(df.loc[:, df.columns.str.contains("DLin")].drop(["DLin-1", "DLin0"], axis=1)).mean(axis=1)
 
+    ## Scale the weight too column
+    df["weight_to"] *= -1e-3
+    
     # df = df[ df["depth"] >= 9 ]
     # df = df[ df["width"] == 256 ]
     # df = df[ df["nrm"] == True ]
     # df = df[ df["lr"] == 1e-3 ]
-    df = df[ df["do_rot"] == True ]
-    df = df[:10]
+    # df = df[ df["do_rot"] == True ]
+    # df = df[:10]
 
     # print( df.groupby(['width']).min()["Res-1"])
     # exit()
 
-    x_vals = np.arange(20, 420, 40)                       ## The x-axis bins for the metric plots
+    x_vals = np.linspace(10, 390, 20)                     ## Bin centers for the metric plots
     metrics = [ "Loss", "Res", "DLin", "Ang" ]            ## The titles of the metrics to be plotted
     cols    = [ "do_rot", "batch_size", "depth", "width", ## The columns of the coordinate plot
-                "skips", "nrm", "lr", "bias", "Loss-1" ]
+                "skips", "nrm", "lr", "weight_to", "bias", "Loss-1" ]
 
     ## Make the parallel coord plot
-    myPL.parallel_plot( df, cols, "Res-1", curved=True, cmap="Spectral" )
+    myPL.parallel_plot( df, cols, "Res-1", curved=True, cmap=spec )
 
     ## Make the MET plots
     for met in metrics:
@@ -52,7 +56,7 @@ def main():
         for i in range(len(df)):
             row = data.iloc[i]
             label = str( list( df.iloc[i][cols[:-2]] ) ) + " " + df.iloc[i].name
-            c = cmap( i / len(df) )
+            c = cmap( (i+0.5) / len(df) )
             ax.plot( x_vals, row.to_numpy()[1:], "o-", color=c, label=label )
         ax.axhline(0, color="k")
         ax.axvline(0, color="k")

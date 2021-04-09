@@ -7,7 +7,7 @@ from pathlib import Path
 from itertools import count
 
 import torch as T
-from torch.utils.data import IterableDataset
+from torch.utils.data import Dataset, IterableDataset, WeightedRandomSampler, RandomSampler, Sampler
 
 def chunk_given_size(a, size):
     return np.split(a, np.arange(size,len(a),size))
@@ -34,23 +34,109 @@ def buildTrainAndValidation( data_dir, test_frac ):
 
     return train_files, test_files
 
-class METDataset(IterableDataset):
-    def __init__(self, file_list, n_ofiles, chnk_size, weight_to):
+class SwitchableSampler(Sampler):
+    def __init__(self, data, sample_weights ):
+        """ A dataset sampler that can switch between random sampling and weighted random sampling
+            Switching is done by using the weight_on and weight_off methods.
+            This sampler is used in the METDataset (map version)
+        """
+        self.n_samples = len(data)
+        self.ws = WeightedRandomSampler( sample_weights, self.n_samples )
+        self.rs = RandomSampler( data )
+        self.do_weights = True
+
+    def __len__(self):
+        self.n_samples
+
+    def __iter__(self):
+        if self.do_weights:
+            return iter(self.ws)
+        else:
+            return iter(self.rs)
+
+    def weight_on(self):
+        self.do_weights = True
+
+    def weight_off(self):
+        self.do_weights = False
+
+class METDataset(Dataset):
+    def __init__(self, file_list, max_weight):
+        """ A standard mappable pytorch dataset where the entire dataset is loaded into memory
+            This results in a massive memory footprint and only should be used for testing and special cases
+        """
+
+        ## Make attributes from all arguments
+        self.file_list  = file_list
+        self.max_weight = max_weight
+        self.do_weights = True if max_weight > 0 else False
+
+        ## Get all the samples into memory
+        self.all_samples    = []
+        self.sample_weights = []
+        for file in tqdm( self.file_list, desc="Loading data into memory", ncols=80, unit="" ):
+
+            with h5py.File( file, 'r' ) as hf:
+                file_data = hf["data/table"]["values_block_0"]
+
+                self.all_samples.append(file_data)
+                self.sample_weights.append(file_data[:, -1])
+
+        ## Flatten the samples and weights into 2D and 1D arrays respectively, count the length
+        self.all_samples = [ sample for chunk in self.all_samples for sample in chunk ]
+        self.sample_weights = np.clip( np.concatenate(self.sample_weights), 0, max_weight )
+        self.n_samples = len(self.all_samples)
+
+        ## The sampler passed to the dataloader depends on if we are using weights
+        self.sampler = SwitchableSampler( self.all_samples, self.sample_weights ) if self.do_weights else None
+
+    def __len__(self):
+        return self.n_samples
+
+    def __getitem__(self, idx):
+
+        ## Get the sample from the list
+        sample = self.all_samples[idx]
+
+        ## Break into inputs, targets and weight value (sampler handles weights)
+        inputs  = sample[:-3]
+        targets = sample[-3:-1]
+
+        return inputs, targets
+
+    def shuffle_files(self):
+        return None
+
+    def weight_on(self):
+        if self.max_weight > 0: ## Sampler is None type if this fails, nothing to change!
+            self.sampler.weight_on()
+
+    def weight_off(self):
+        if self.max_weight > 0: ## Sampler is None type if this fails, nothing to change!
+            self.sampler.weight_off()
+
+class StreamMETDataset(IterableDataset):
+    def __init__(self, file_list, n_ofiles, chnk_size, max_weight):
+        """ An iterable dataset for when the trainin set is too large to hold in memory.
+            It defines a buffer for each thread which reads in chunks from a set number of files.
+            Minimal memory footprint.
+        """
 
         ## Make attributes from all arguments
         self.file_list  = file_list
         self.n_ofiles   = n_ofiles
         self.chnk_size  = chnk_size
-        self.weight_to  = weight_to
-        self.do_weights = True if weight_to > 0 else False
+        self.max_weight = max_weight
+        self.do_weights = True if max_weight > 0 else False
 
         ## Calculate the number of samples in the dataset set
         self.n_samples = 0
         for file in tqdm( self.file_list, desc="Collecting Files", ncols=80, unit="" ):
-            hf = h5py.File( file, 'r' )
-            file_len = len(hf["data/table"])
-            hf.close()
-            self.n_samples += file_len
+            with h5py.File( file, 'r' ) as hf:
+                self.n_samples += len(hf["data/table"])
+
+        ## Setting the attribute "sampler" to none so that we have same interface as METDataset
+        self.sampler = None
 
     def __len__(self):
         return self.n_samples
@@ -73,9 +159,7 @@ class METDataset(IterableDataset):
 
         ## For multiple workers we break up the file list so they each work on a single subset
         else:
-            wrk_id = worker_info.id
-            n_wrks = worker_info.num_workers
-            worker_files = np.array_split( self.file_list, n_wrks )[wrk_id]
+            worker_files = np.array_split( self.file_list, worker_info.num_workers )[worker_info.id]
 
         ## Further partition the worker's file list into the ones open at a time
         ofiles_list = chunk_given_size( worker_files, self.n_ofiles )
@@ -96,13 +180,13 @@ class METDataset(IterableDataset):
                 ## Iterate through the batches taken from the buffer
                 for sample in buffer:
 
-                    ## Get the MLP input and target variables
+                    ## Get the input, target, and sample weight
                     inputs  = sample[:-3]
                     targets = sample[-3:-1]
                     weight  = sample[-1]
 
                     ## We return the sample if the weights allow it (or statements are short circuted)
-                    if not self.do_weights or weight > self.weight_to or self.weight_to*random.random() < weight:
+                    if not self.do_weights or weight > self.max_weight or self.max_weight*random.random() < weight:
                         yield inputs, targets
 
     def load_chunks(self, files, c_count):
@@ -111,25 +195,26 @@ class METDataset(IterableDataset):
         start = c_count * self.chnk_size
         end   = start + self.chnk_size
 
-        ## Get a chunk from each file
+        ## Get a chunk from each file to load into the buffer
         buffer = []
         for f in files:
 
             ## Running "with" ensures the file is closed
             with h5py.File( f, 'r' ) as hf:
-                chunk = hf["data/table"][start:end]     ## Will return an empty list if we asked for idx outside filesize
-                chunk = np.array([c[1] for c in chunk]) ## Annoying thing we must do as the data is a tuple (idx, [sample])
 
-            ## If the chunk is non empty we add it to the buffer
+                ## Will return an empty list if we asked for idx outside filesize, will return a numpy array (not a list!)
+                chunk = hf["data/table"][start:end]["values_block_0"]
+
+            ## If the chunk is not empty we add it to the buffer
             if len(chunk) != 0:
                 buffer.append(chunk)
 
-        ## If the buffer is empty it means that no files had any data left
-        if len(buffer) == 0:
+        ## If the buffer is empty it means that no files had any data left ("not list" is a quicker python way to check if empty)
+        if not buffer:
             return None
 
-        ## Get the buffer as a single array and shuffle
-        buffer = np.vstack( buffer )
+        ## Get the buffer as a flattend (3D->2D) list and shuffle (using lists is faster than numpy arrays)
+        buffer = [ sample for chunk in buffer for sample in chunk ]
         np.random.shuffle( buffer )
         return buffer
 
@@ -138,7 +223,8 @@ class METDataset(IterableDataset):
         np.random.shuffle( self.file_list )
 
     def weight_on(self):
-        self.do_weights = True
+        if self.max_weight > 0:
+            self.do_weights = True
 
     def weight_off(self):
         self.do_weights = False
