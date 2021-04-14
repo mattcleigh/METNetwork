@@ -39,11 +39,6 @@ def get_args():
                          help = "Perform rotations using \"Tight_Phi\"",
                          default = True )
 
-    parser.add_argument( "--do_weight",
-                         type = str2bool,
-                         help = "Calculate the weight of each sample based on the True ET distribution",
-                         default = True )
-
     return parser.parse_args()
 
 def main():
@@ -55,40 +50,33 @@ def main():
     args = get_args()
 
     ## Create the path to the output folder and ensure that it is empty (strange things happen with dask to_hdf if they exist)
-    output_path = Path( args.output_dir, "Rotated3" if args.do_rot else "Raw" )
+    output_path = Path( args.output_dir, "Rotated" if args.do_rot else "Raw" )
     if output_path.exists(): shutil.rmtree(output_path)
     output_path.mkdir(parents=True)
 
     ## Read all csv files in the input folder into a dask dataframe (set blocksize to 64Mb)
-    df = dd.read_csv( args.input_dir + "*01.*.csv", assume_missing=True, blocksize=64e6 ) ## Missing means that 0 is a float
+    df = dd.read_csv( args.input_dir + "*.csv", assume_missing=True, blocksize=64e6 ) ## Missing means that 0 is a float
     col_names = list(df.columns)
 
-    if args.do_weight:
+    #### We histogram the dataset based on its True ET miss distribution ####
+    h_max  = 400e3
+    n_bins = 300
 
-        ## Some constants about the histogram
-        h_min  = 1e3
-        h_max  = 3e5
-        n_bins = 100
+    ## Create the histogram
+    mags = da.sqrt(df["True_EX"]**2 + df["True_EY"]**2)
+    hist, bins = da.histogram(mags, bins=n_bins, range=[0, h_max], density=True )
+    mid_bins = ( bins[:-1] + bins[1:] ) / 2
+    hist = hist.compute()
 
-        ## Create the histogram based on true magnitude of the dataset
-        mags = da.sqrt(df["True_EX"]**2 + df["True_EY"]**2)
-        hist, bins = da.histogram(mags, bins=n_bins, range=[h_min, h_max] )
-        mid_bins = ( bins[:-1] + bins[1:] ) / 2
-        hist = hist.compute()
+    ## Save the histogram as an image
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize = (8,5) )
+    ax1.step( mid_bins, hist, where = "mid" )
+    fig.savefig( Path( output_path, "hist.png" ) )
 
-        ## Interpolate and calculate weight using reciprocal of bin height
-        interp = interp1d( mid_bins, hist, kind="cubic", bounds_error=False, fill_value=tuple(hist[[0,-1]]) )
-        weight = mags.apply( interp, meta="float32" )
-        weight = interp(1.5e5) / weight ## We use the height at 150 GeV to make the numbers fit in a reasonable scale
-
-        ## Save the histogram and weight values as an image and a csv
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize = (8,5) )
-        weight_line = interp(1.5e5) / interp(mid_bins)
-        ax1.step( mid_bins, hist, where = "mid" )
-        ax2.plot( mid_bins, weight_line )
-        fig.savefig( Path( output_path, "hist.png" ) )
-        np.savetxt(  Path( output_path, "hist.csv" ),   np.vstack((mid_bins, hist)).T, delimiter="," )
-        np.savetxt(  Path( output_path, "weights.csv" ), np.vstack((mid_bins, weight_line)).T, delimiter="," )
+    ## Save the histogram, after inserting expectation value, to a csv
+    mid_bins = np.insert( mid_bins, 0, 0 )
+    hist = np.insert( hist, 0, mags.mean().compute() )
+    np.savetxt( Path( output_path, "hist.csv" ), np.vstack((mid_bins, hist)).T, delimiter="," )
 
     if args.do_rot:
 
@@ -107,17 +95,7 @@ def main():
         rotated_x =   arr[:, xs] * da.cos(angles) + arr[:, ys] * da.sin(angles)
         rotated_y = - arr[:, xs] * da.sin(angles) + arr[:, ys] * da.cos(angles)
 
-        ## Convert each of the rotated arrays into a dataframe
-        # rot_x_df = rotated_x.to_dask_dataframe(columns=xcol_names)
-        # rot_y_df = rotated_y.to_dask_dataframe(columns=ycol_names)
-
-        ## Replace the appropriate columns in the original df with the corresponding ones in the rotated dfs
-        # for col in xcol_names:
-        #     df[col] = rot_x_df[col]
-        # for col in ycol_names:
-        #     df[col] = rot_y_df[col]
-
-        ## Slower but more memory efficient version of steps above
+        ##  Replace the appropriate columns in the original df with the corresponding ones in the rotated dfs
         for i, col in enumerate(xcol_names):
             df[col] = rotated_x[:, i]
         for i, col in enumerate(ycol_names):
@@ -143,10 +121,9 @@ def main():
     ## Normalise the dataframe
     normed = (df - mean) / (sdev+1e-6)
 
-    ## After normalisation can add the weights back in (otherwise the weights would have been normed)
-    if args.do_weight:
-        normed["Weight"] = weight
-        col_names += ["Weight"]
+    ## After normalisation can add the True ET back in (unnormed)
+    normed["True_ET"] = mags
+    col_names += ["True_ET"]
 
     ## The column orders change when we normalise (?), we fix this and also cast to float
     normed = normed[col_names].astype("float32")

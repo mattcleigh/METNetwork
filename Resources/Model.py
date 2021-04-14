@@ -28,39 +28,35 @@ class METNET_Agent(object):
         self.n_bins = 20
         self.bin_max = 400
 
-    def setup_dataset( self, data_dir, stream_data, do_rot, weight_to, valid_frac, n_ofiles, chnk_size, batch_size, n_workers ):
+    def setup_dataset( self, data_dir, stream, do_rot, weight_to, v_frac, n_ofiles, chnk_size, batch_size, n_workers ):
         """ Uses a pytorch dataloader to get the training and validation sets
         """
         ## Update our information dictionary
         self.__dict__.update( (k,v) for k,v in vars().items() if k != "self" )
 
-        ## The data dir and the stat file depend on if we are doing rotations
+        ## The data dir, stat and the histogram file depend on if we are doing rotations
         self.data_dir  = Path( self.data_dir, "Rotated" if do_rot else "Raw" )
         self.stat_file = Path( self.data_dir, "stats.csv" )
-
-        ## We read the weight file to get the max value of the weights
-        max_weight = 0
-        if weight_to > 0:
-            weight_file = Path( self.data_dir, "weights.csv" )
-            weights = np.loadtxt(weight_file, delimiter=",")
-            max_weight = weights[ (np.abs(weights[:,0] - weight_to)).argmin(), 1 ]
+        hist_file = Path( self.data_dir, "hist.csv" )
 
         ## Build the list of files that will be used in the train and validation set
-        train_files, valid_files = myDS.buildTrainAndValidation( self.data_dir, valid_frac )
+        train_files, valid_files = myDS.buildTrainAndValidation( self.data_dir, v_frac )
         self.n_train_files = len(train_files)
         self.n_valid_files = len(valid_files)
 
-        ## Get the defined iterable dataset objects
-        if stream_data:
-            train_set = myDS.StreamMETDataset( train_files, n_ofiles, chnk_size, max_weight )
-            valid_set = myDS.StreamMETDataset( valid_files, n_ofiles, chnk_size, max_weight )
+        ## Get the iterable dataset objects
+        if stream:
+            train_set = myDS.StreamMETDataset( train_files, n_ofiles, chnk_size, hist_file, weight_type)
+            valid_set = myDS.StreamMETDataset( valid_files, n_ofiles, chnk_size, hist_file, weight_type)
+
+        ## Or the map-style dataset objects
         else:
             train_set = myDS.METDataset( train_files, max_weight )
             valid_set = myDS.METDataset( valid_files, max_weight )
 
-        ## Create the pytorch dataloaders
+        ## Create the pytorch dataloaders (works for both types of datset)
         self.train_loader = DataLoader( train_set,
-                                        drop_last   = True,                                ## Causes errors with batch norm is batch = 1
+                                        drop_last   = True,                                ## Causes errors with batch norm if batch = 1
                                         batch_size  = batch_size,                          ## Set by training script
                                         sampler     = train_set.sampler,                   ## Is always None for iterable dataset
                                         num_workers = min(self.n_train_files, n_workers),  ## Dont want dead workers if not enough files
@@ -90,7 +86,7 @@ class METNET_Agent(object):
         ## Creating the neural network
         self.network = myNN.MET_MLP( "res_mlp", n_in, act, depth, width, skips, nrm, drpt )
 
-    def setup_training( self, loss_fn, lr, clip_grad ):
+    def setup_training( self, loss_fn, lr ):
         """ Sets up variables used for training, including the optimiser
         """
         ## Update our information dictionary
@@ -99,6 +95,7 @@ class METNET_Agent(object):
         ## Initialise the optimiser
         self.optimiser = optim.Adam( self.network.parameters(), lr=lr )
 
+        ## The history of train losses, epoch times etc ...
         self.trn_hist = []
         self.vld_hist = []
         self.tim_hist = []
@@ -127,18 +124,20 @@ class METNET_Agent(object):
             outputs = self.network( inputs )
 
             ## Calculate the batch loss
-            loss = self.loss_fn( outputs, targets )
+            loss = self.loss_fn( outputs, targets ).mean()
+            # loss = ( self.loss_fn( outputs, targets ).mean( dim=1 ) * weights.to(self.network.device) ).mean()
 
-            ## Perform gradient descent
+            ## Calculate the gradients
             loss.backward()
-            if self.clip_grad > 0: nn.utils.clip_grad_value_( self.network.parameters(), self.clip_grad )
+
+            ## Update the parameters
             self.optimiser.step()
 
-            ## Update the running loss
+            ## Track the running loss
             running_loss += loss.item()
 
         ## Update loss history and epoch counter
-        self.trn_hist.append( running_loss / (i+1) ) ## Divide by i as we dont include final batches
+        self.trn_hist.append( running_loss / (i+1) ) ## Divide by i as we dont include final (unfilled) batches
         self.epochs_trained += 1
 
     def _test_epoch(self):
@@ -152,13 +151,14 @@ class METNET_Agent(object):
                 inputs = inputs.to(self.network.device)
                 targets = targets.to(self.network.device)
                 outputs = self.network( inputs )
-                loss = self.loss_fn( outputs, targets )
+                loss = self.loss_fn( outputs, targets ).mean()
+                # loss = ( self.loss_fn( outputs, targets ).mean( dim=1 ) * weights.to(self.network.device) ).mean()
                 running_loss += loss.item()
-            self.vld_hist.append( running_loss / (i+1) ) ## Divide by i as we dont include final batches
+            self.vld_hist.append( running_loss / (i+1) ) ## Divide by i as we dont include final (unfilled) batches
 
     def run_training_loop( self, max_epochs = 10, patience = 20, sv_every = 20 ):
         """ This is the main loop which cycles epochs of train and test
-            It also updates graphs and saves the network
+            It saves the network and checks for early stopping
         """
         ## Update our information dictionary
         self.__dict__.update( (k,v) for k,v in vars().items() if k != "self" )
@@ -174,7 +174,7 @@ class METNET_Agent(object):
             self._train_epoch()
             self._test_epoch()
 
-            ## Shuffle the file order in the datasets
+            ## Shuffle the file order in the datasets (does nothing for map-style datasets)
             self.train_loader.dataset.shuffle_files()
             self.valid_loader.dataset.shuffle_files()
 
@@ -186,7 +186,7 @@ class METNET_Agent(object):
             print( "Average loss on validaiton set: {:.5}".format( self.vld_hist[-1] ) )
             print( "Epoch Time: {:.5}".format( self.tim_hist[-1] ) )
 
-            ## Calculate the number of bad epochs
+            ## Calculate the best epoch and the number of bad epochs
             self.best_epoch = np.argmin(self.vld_hist) + 1
             self.bad_epochs = len(self.vld_hist) - self.best_epoch
 
@@ -228,7 +228,7 @@ class METNET_Agent(object):
                 shutil.rmtree(full_name)
         full_name.mkdir(parents=True, exist_ok=True)
 
-        ## Save the network and optimiser tensors for the best and checkpoint versions
+        ## Save the network and optimiser tensors for the latest, best and checkpoint versions
         for flag in model_flags:
             model_folder = Path( full_name, "models" )
             model_folder.mkdir(parents=True, exist_ok=True)
@@ -246,7 +246,7 @@ class METNET_Agent(object):
             f.write( "\n\n"+str(self.optimiser) )
             f.write( "\n" ) ## One line for whitespace
 
-        ## Save the loss history, with epoch times, and a png of the graph
+        ## Save the loss history, epoch times, and a png of the graph
         hist_array = np.transpose( np.vstack(( self.trn_hist, self.vld_hist, self.tim_hist )) )
         np.savetxt( Path( full_name, "train_hist.csv" ), hist_array )
         self.loss_plot.save( self.trn_hist, self.vld_hist, Path( full_name, "loss.png" ) )
@@ -286,8 +286,8 @@ class METNET_Agent(object):
         devs  = T.from_numpy(stats[1,-2:]).to(self.network.device)
 
         ## The performance metrics to be calculated are stored in a running total matrix
-        run_totals = np.zeros( (self.n_bins+1, 5) ) ## (Nbins + total column) x (bins_counts + metrics)
-        met_names  = [ "Loss", "Res", "Ang", "DLin" ]
+        met_names  = [ "Loss", "Res", "Mag", "Ang", "DLin" ]
+        run_totals = np.zeros( ( 1+self.n_bins, 1+len(met_names) ) ) ## rows = (total, bin1, bin2...) x cols = (n_events, *met_names)
 
         ## Iterate through the validation set
         with T.no_grad():
@@ -308,18 +308,19 @@ class METNET_Agent(object):
                 targ_mag = T.norm(real_targ, dim=1)
                 outp_mag = T.norm(real_outp, dim=1)
 
-                ## Get the bin numbers from the true met magnitude
+                ## Get the bin numbers from the true met magnitude (final bin includes overflow)
                 bins = T.clamp( targ_mag / (self.bin_max/self.n_bins), 0, self.n_bins-1 ).int().cpu().numpy()
 
                 ## Calculate the batch totals of each metric
-                batch_totals = T.zeros( ( len(inputs), 5 ) )
+                batch_totals = T.zeros( ( len(inputs), 1+len(met_names) ) )
                 dot = T.sum( real_outp * real_targ, dim=1 ) / ( outp_mag * targ_mag + 1e-4 )
 
-                batch_totals[:, 0] = T.ones_like(targ_mag)                                            ## Ones for counting bins
-                batch_totals[:, 1] = F.smooth_l1_loss(outputs, targets, reduction="none").sum(axis=1) ## Loss
-                batch_totals[:, 2] = ( outp_mag - targ_mag )**2                                       ## Resolution
-                batch_totals[:, 3] = T.acos( dot )**2                                                 ## Angular resolution
-                batch_totals[:, 4] = ( outp_mag - targ_mag ) / ( targ_mag + 1e-4 )                    ## Deviation from Linearity
+                batch_totals[:, 0] = T.ones_like(targ_mag)                                             ## Ones are for counting bins
+                batch_totals[:, 1] = F.smooth_l1_loss(outputs, targets, reduction="none").mean(dim=1)  ## Loss
+                batch_totals[:, 2] = ( ( real_outp - real_targ )**2 ).mean(dim=1)                      ## XY Resolution
+                batch_totals[:, 3] = ( outp_mag - targ_mag )**2                                        ## Magnitude Resolution
+                batch_totals[:, 4] = T.acos( dot )**2                                                  ## Angular resolution
+                batch_totals[:, 5] = ( outp_mag - targ_mag ) / ( targ_mag + 1e-4 )                     ## Deviation from Linearity
 
                 ## Fill in running data by summing over each bin, bin 0 is reserved for dataset totals
                 for b in range(self.n_bins):
@@ -330,24 +331,23 @@ class METNET_Agent(object):
         run_totals[:,0] = np.clip( run_totals[:,0], 1, None ) ## Just incase some of the bins were empty, dont wana divide by 0
 
         ## Turn the totals into means or RMSE values
-        run_totals[:,1] = run_totals[:,1] / run_totals[:,0]
-        run_totals[:,2] = np.sqrt( run_totals[:,2] / run_totals[:,0] )
-        run_totals[:,3] = np.sqrt( run_totals[:,3] / run_totals[:,0] )
-        run_totals[:,4] = run_totals[:,4] / run_totals[:,0]
+        run_totals[:,1] = run_totals[:,1] / run_totals[:,0]            ## Want average per bin
+        run_totals[:,2] = np.sqrt( run_totals[:,2] / run_totals[:,0] ) ## Want RMSE per bin
+        run_totals[:,3] = np.sqrt( run_totals[:,3] / run_totals[:,0] ) ## Want RMSE per bin
+        run_totals[:,4] = np.sqrt( run_totals[:,4] / run_totals[:,0] ) ## Want RMSE per bin
+        run_totals[:,5] = run_totals[:,5] / run_totals[:,0]            ## Want average per bin
 
         ## Flatten the metrics and drop the number of events in each bin
         metrics = run_totals[:,1:].flatten(order='F')
         metrics = np.expand_dims(metrics, 0)
 
         ## Getting the names of the columns
-        cols = []
-        for met in met_names:
-            cols += [ met+str(i) for i in range(-1, self.n_bins) ]
+        cols = [ met+str(i) for met in met_names for i in range(-1, self.n_bins) ]
 
         ## Write the dataframe to the csv
-        fnm = Path( self.save_dir, self.name, "perf.csv" )
         df = pd.DataFrame( data=metrics, index=[self.name], columns=cols )
         df = pd.concat( [ df, self.get_info() ], axis=1 ) ## Combine the performance dataframe with info on the network
+        fnm = Path( self.save_dir, self.name, "perf.csv" )
         df.to_csv( fnm, mode="w" )
 
         ## Turn the sampler back on for the validation set
@@ -355,11 +355,12 @@ class METNET_Agent(object):
 
     def get_info(self):
         """ This function is used to return preselected information about the network and
-            the training using the class attributes. It returns a dataframe.
+            the training using the class attributes. It is use primarily for the parallel coordinate plot.
+            It returns a dataframe.
         """
         columns = [ "do_rot",
                     "weight_to",
-                    "valid_frac",
+                    "v_frac",
                     "batch_size",
                     "n_train_files",
                     "n_valid_files",
@@ -373,7 +374,6 @@ class METNET_Agent(object):
                     "drpt",
                     "loss_fn",
                     "lr",
-                    "clip_grad",
                     "epochs_trained",
                     "best_epoch" ]
         data = [[ self.__dict__[c] for c in columns ]]

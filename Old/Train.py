@@ -10,7 +10,7 @@ def main():
     model.setup_dataset( data_dir   = "../Data/",
                          do_rot     = True,
                          weight_to  = 2e5,
-                         valid_frac = 99e-2,
+                         v_frac = 99e-2,
                          n_ofiles   = 2,   chnk_size = 1024,
                          batch_size = 512, n_workers = 4 )
 
@@ -21,8 +21,7 @@ def main():
 
     ## Setup up the parameters for training
     model.setup_training( loss_fn = nn.SmoothL1Loss(),
-                          lr = 1e-4,
-                          clip_grad = 0 )
+                          lr = 1e-4 )
 
     ## Load a previous network state
     model.load( "best" )

@@ -27,7 +27,7 @@ def get_args():
                          help = "The output folder containing the saved networks",
                          required = True )
 
-    parser.add_argument( "--stream_data",
+    parser.add_argument( "--stream",
                          type = str2bool,
                          help = "Whether to stream the dataset using buffers (T) or load it all into memory (F)",
                          default = True )
@@ -39,7 +39,22 @@ def get_args():
 
     parser.add_argument( "--weight_to",
                          type = float,
-                         help = "The location of the falling edge of the plateau in MeV",
+                         help = "The location of the falling edge of the plateau in GeV",
+                         required = True )
+
+    parser.add_argument( "--v_frac",
+                         type = float,
+                         help = "The fraction of input files reserved for the validation set",
+                         required = True )
+
+    parser.add_argument( "--n_ofiles",
+                         type = int,
+                         help = "The number of files that are opened together for a single buffer",
+                         required = True )
+
+    parser.add_argument( "--chnk_size",
+                         type = int,
+                         help = "The size of the chunks taken from each of the ofiles to fill the buffer",
                          required = True )
 
     parser.add_argument( "--bsize",
@@ -67,6 +82,11 @@ def get_args():
                          help = "Whether to do batch norm in each hidden layer",
                          required = True )
 
+    parser.add_argument( "--drpt",
+                         type = float,
+                         help = "The drop-out probability for each hidden layer",
+                         required = True )
+
     parser.add_argument( "--lr",
                          type = float,
                          help = "The optimiser learning rate / step size",
@@ -88,6 +108,7 @@ def print_args( args ):
 def pass_blacklist( args ):
 
     blacklist = [
+                    ( "depth", 9,   "width", 1024 ),
                     ( "depth", 5,   "width", 256 ),
                     ( "skips", 0,   "width", 256 ),
     ]
@@ -113,26 +134,24 @@ def main():
     model = Model.METNET_Agent( name = args.name, save_dir = args.save_dir )
 
     ## Load up the dataset
-    model.setup_dataset( data_dir    = args.data_dir,
-                         stream_data = args.stream_data,
-                         do_rot      = args.do_rot,
-                         weight_to   = args.weight_to,
-                         valid_frac  = 1e-1,
-                         n_ofiles    = 32, chnk_size = 8192,
-                         batch_size  = args.bsize, n_workers = args.n_workers )
+    model.setup_dataset( data_dir   = args.data_dir,
+                         stream     = args.stream,
+                         do_rot     = args.do_rot,
+                         weight_to  = args.weight_to,
+                         v_frac     = args.v_frac,
+                         n_ofiles   = args.n_ofiles, chnk_size = args.chnk_size,
+                         batch_size = args.bsize,    n_workers = args.n_workers )
 
     ## Initialise the network
     model.setup_network( act = nn.LeakyReLU(0.1),
                          depth = args.depth, width = args.width, skips = args.skips,
-                         nrm = args.nrm, drpt = 0.0 )
+                         nrm = args.nrm, drpt = args.drpt )
 
     ## Setup up the parameters for training
-    model.setup_training( loss_fn = nn.SmoothL1Loss(),
-                          lr = args.lr,
-                          clip_grad = 0 )
+    model.setup_training( loss_fn = nn.SmoothL1Loss( reduction="none" ), lr = args.lr )
 
     ## Run the training loop
-    model.run_training_loop( max_epochs = 1000, patience = 10+10*(args.weight_to>0), sv_every = 1000 )
+    model.run_training_loop( max_epochs = 1000, patience = 10, sv_every = 1000 )
 
 if __name__ == '__main__':
     main()
