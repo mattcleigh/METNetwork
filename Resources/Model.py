@@ -25,10 +25,13 @@ class METNET_Agent(object):
         self.name = name
 
         ## How to setup the bins for performance metrics
-        self.n_bins = 20
+        self.n_bins = 50
         self.bin_max = 400
 
-    def setup_dataset( self, data_dir, stream, do_rot, weight_to, v_frac, n_ofiles, chnk_size, batch_size, n_workers ):
+    def setup_dataset( self, data_dir, do_rot,
+                             weight_to, weight_ratio, weight_shift,
+                             v_frac, n_ofiles, chnk_size,
+                             batch_size, n_workers ):
         """ Uses a pytorch dataloader to get the training and validation sets
         """
         ## Update our information dictionary
@@ -45,14 +48,8 @@ class METNET_Agent(object):
         self.n_valid_files = len(valid_files)
 
         ## Get the iterable dataset objects
-        if stream:
-            train_set = myDS.StreamMETDataset( train_files, n_ofiles, chnk_size, hist_file, weight_type)
-            valid_set = myDS.StreamMETDataset( valid_files, n_ofiles, chnk_size, hist_file, weight_type)
-
-        ## Or the map-style dataset objects
-        else:
-            train_set = myDS.METDataset( train_files, max_weight )
-            valid_set = myDS.METDataset( valid_files, max_weight )
+        train_set = myDS.StreamMETDataset( train_files, n_ofiles, chnk_size, hist_file, weight_to, weight_ratio, weight_shift )
+        valid_set = myDS.StreamMETDataset( valid_files, n_ofiles, chnk_size, hist_file, weight_to, weight_ratio, weight_shift )
 
         ## Create the pytorch dataloaders (works for both types of datset)
         self.train_loader = DataLoader( train_set,
@@ -71,8 +68,8 @@ class METNET_Agent(object):
         ## Report on the number of files/samples used
         self.train_size = len(train_set)
         self.valid_size = len(valid_set)
-        print( "Train set:       {} samples (in {} files)".format( self.train_size, self.n_train_files ) )
-        print( "Validation set:  {} samples (in {} files)".format( self.valid_size, self.n_valid_files ) )
+        print( "Train set:       {:10} samples in {:4} files".format( self.train_size, self.n_train_files ) )
+        print( "Validation set:  {:10} samples in {:4} files".format( self.valid_size, self.n_valid_files ) )
 
     def setup_network( self, act, depth, width, skips, nrm, drpt ):
         """ This initialises the mlp network structure
@@ -111,7 +108,7 @@ class METNET_Agent(object):
         self.network.train()
         running_loss = 0
 
-        for i, (inputs, targets) in enumerate( tqdm( self.train_loader, desc="Training", ncols=80, unit="" ) ):
+        for i, (inputs, targets, weights) in enumerate( tqdm( self.train_loader, desc="Training", ncols=80 ) ):
 
             ## Zero out the gradients
             self.optimiser.zero_grad()
@@ -119,13 +116,13 @@ class METNET_Agent(object):
             ## Move data to the network device (GPU)
             inputs = inputs.to(self.network.device)
             targets = targets.to(self.network.device)
+            weights = weights.to(self.network.device)
 
             ## Calculate the network output
             outputs = self.network( inputs )
 
             ## Calculate the batch loss
-            loss = self.loss_fn( outputs, targets ).mean()
-            # loss = ( self.loss_fn( outputs, targets ).mean( dim=1 ) * weights.to(self.network.device) ).mean()
+            loss = ( self.loss_fn( outputs, targets ).mean( dim=1 ) * weights ).mean()
 
             ## Calculate the gradients
             loss.backward()
@@ -147,12 +144,12 @@ class METNET_Agent(object):
         with T.no_grad():
             self.network.eval()
             running_loss = 0
-            for i, (inputs, targets) in enumerate( tqdm( self.valid_loader, desc="Testing ", ncols=80, unit="" ) ):
+            for i, (inputs, targets, weights) in enumerate( tqdm( self.valid_loader, desc="Testing ", ncols=80 ) ):
                 inputs = inputs.to(self.network.device)
                 targets = targets.to(self.network.device)
+                weights = weights.to(self.network.device)
                 outputs = self.network( inputs )
-                loss = self.loss_fn( outputs, targets ).mean()
-                # loss = ( self.loss_fn( outputs, targets ).mean( dim=1 ) * weights.to(self.network.device) ).mean()
+                loss = ( self.loss_fn( outputs, targets ).mean( dim=1 ) * weights ).mean()
                 running_loss += loss.item()
             self.vld_hist.append( running_loss / (i+1) ) ## Divide by i as we dont include final (unfilled) batches
 
@@ -289,11 +286,14 @@ class METNET_Agent(object):
         met_names  = [ "Loss", "Res", "Mag", "Ang", "DLin" ]
         run_totals = np.zeros( ( 1+self.n_bins, 1+len(met_names) ) ) ## rows = (total, bin1, bin2...) x cols = (n_events, *met_names)
 
+        ## The also build a histogram of the output magnitude
+        hist = np.zeros( self.n_bins )
+
         ## Iterate through the validation set
         with T.no_grad():
             self.valid_loader.dataset.weight_off() ## Turn off weighted sampling!
             self.network.eval()
-            for (inputs, targets) in tqdm( self.valid_loader, desc="Performance", ncols=80, unit="" ):
+            for (inputs, targets, weights) in tqdm( self.valid_loader, desc="Performance", ncols=80 ):
 
                 ## Pass the information through the network
                 inputs = inputs.to(self.network.device)
@@ -309,7 +309,7 @@ class METNET_Agent(object):
                 outp_mag = T.norm(real_outp, dim=1)
 
                 ## Get the bin numbers from the true met magnitude (final bin includes overflow)
-                bins = T.clamp( targ_mag / (self.bin_max/self.n_bins), 0, self.n_bins-1 ).int().cpu().numpy()
+                bins = T.clamp( targ_mag * self.n_bins / self.bin_max, 0, self.n_bins-1 ).int().cpu().numpy()
 
                 ## Calculate the batch totals of each metric
                 batch_totals = T.zeros( ( len(inputs), 1+len(met_names) ) )
@@ -326,6 +326,9 @@ class METNET_Agent(object):
                 for b in range(self.n_bins):
                     run_totals[b+1] += batch_totals[ bins==b ].sum(axis=0).cpu().numpy()
 
+                ## Fill in the reconstructed magnitude histogram
+                hist += np.histogram( outp_mag.cpu(), bins=self.n_bins, range=[0,self.bin_max] )[0]
+
         ## Include the totals over the whole dataset by summing and placing it in the first location
         run_totals[0] = run_totals.sum(axis=0, keepdims=True)
         run_totals[:,0] = np.clip( run_totals[:,0], 1, None ) ## Just incase some of the bins were empty, dont wana divide by 0
@@ -341,12 +344,17 @@ class METNET_Agent(object):
         metrics = run_totals[:,1:].flatten(order='F')
         metrics = np.expand_dims(metrics, 0)
 
-        ## Getting the names of the columns
-        cols = [ met+str(i) for met in met_names for i in range(-1, self.n_bins) ]
+        ## Get the names of the columns and convert the metrics to a dataframe
+        mcols = [ met+str(i) for met in met_names for i in range(-1, self.n_bins) ]
+        mdf = pd.DataFrame( data=metrics, index=[self.name], columns=mcols )
 
-        ## Write the dataframe to the csv
-        df = pd.DataFrame( data=metrics, index=[self.name], columns=cols )
-        df = pd.concat( [ df, self.get_info() ], axis=1 ) ## Combine the performance dataframe with info on the network
+        ## Expand, label and convert the histogram to a dataframe
+        hist = np.expand_dims(hist, 0)
+        hcols = [ "hist"+str(i) for i in range(self.n_bins) ]
+        hdf = pd.DataFrame( data=hist, index=[self.name], columns=hcols )
+
+        ## Write the combined dataframe to the csv
+        df = pd.concat( [ mdf, hdf, self.get_info() ], axis=1 ) ## Combine the performance dataframe with info on the network
         fnm = Path( self.save_dir, self.name, "perf.csv" )
         df.to_csv( fnm, mode="w" )
 
@@ -360,6 +368,8 @@ class METNET_Agent(object):
         """
         columns = [ "do_rot",
                     "weight_to",
+                    "weight_ratio",
+                    "weight_shift",
                     "v_frac",
                     "batch_size",
                     "n_train_files",

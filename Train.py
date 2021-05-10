@@ -27,11 +27,6 @@ def get_args():
                          help = "The output folder containing the saved networks",
                          required = True )
 
-    parser.add_argument( "--stream",
-                         type = str2bool,
-                         help = "Whether to stream the dataset using buffers (T) or load it all into memory (F)",
-                         default = True )
-
     parser.add_argument( "--do_rot",
                          type = str2bool,
                          help = "Whether to use a pre-rotated dataset",
@@ -40,6 +35,16 @@ def get_args():
     parser.add_argument( "--weight_to",
                          type = float,
                          help = "The location of the falling edge of the plateau in GeV",
+                         required = True )
+
+    parser.add_argument( "--weight_ratio",
+                         type = float,
+                         help = "The maximum allowed loss weight ratio between two events",
+                         required = True )
+
+    parser.add_argument( "--weight_shift",
+                         type = float,
+                         help = "The gradient [-1, 1] of the linear shift applied to the event weights",
                          required = True )
 
     parser.add_argument( "--v_frac",
@@ -135,12 +140,10 @@ def main():
 
     ## Load up the dataset
     model.setup_dataset( data_dir   = args.data_dir,
-                         stream     = args.stream,
                          do_rot     = args.do_rot,
-                         weight_to  = args.weight_to,
-                         v_frac     = args.v_frac,
-                         n_ofiles   = args.n_ofiles, chnk_size = args.chnk_size,
-                         batch_size = args.bsize,    n_workers = args.n_workers )
+                         weight_to  = args.weight_to, weight_ratio = args.weight_ratio, weight_shift = args.weight_shift,
+                         v_frac     = args.v_frac, n_ofiles = args.n_ofiles, chnk_size = args.chnk_size,
+                         batch_size = args.bsize, n_workers = args.n_workers )
 
     ## Initialise the network
     model.setup_network( act = nn.LeakyReLU(0.1),

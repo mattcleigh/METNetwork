@@ -68,14 +68,10 @@ def main():
     mid_bins = ( bins[:-1] + bins[1:] ) / 2
     hist = hist.compute()
 
-    ## Save the histogram as an image
+    ## Save the histogram as an image and as a csv
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize = (8,5) )
     ax1.step( mid_bins, hist, where = "mid" )
     fig.savefig( Path( output_path, "hist.png" ) )
-
-    ## Save the histogram, after inserting expectation value, to a csv
-    mid_bins = np.insert( mid_bins, 0, 0 )
-    hist = np.insert( hist, 0, mags.mean().compute() )
     np.savetxt( Path( output_path, "hist.csv" ), np.vstack((mid_bins, hist)).T, delimiter="," )
 
     if args.do_rot:
@@ -121,7 +117,7 @@ def main():
     ## Normalise the dataframe
     normed = (df - mean) / (sdev+1e-6)
 
-    ## After normalisation can add the True ET back in (unnormed)
+    ## After normalisation can add the True ET back in (unnormed), this is needed for weight calculation!
     normed["True_ET"] = mags
     col_names += ["True_ET"]
 

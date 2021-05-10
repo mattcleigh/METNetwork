@@ -1,18 +1,19 @@
 python Train.py \
-  --name      test_100w \
-  --save_dir  ../Saved_Networks/Small_Flat \
+  --name      test_45t300 \
+  --save_dir  ../Saved_Networks/tmp \
   --data_dir  ../Data/ \
-  --stream    True \
   --do_rot    True \
-  --weight_to 100 \
+  --weight_to  45 \
+  --weight_ratio 0.0 \
+  --weight_shift 0.0 \
   --v_frac    0.1 \
   --n_ofiles  32 \
   --chnk_size 1024 \
   --bsize     512 \
   --n_workers 4 \
-  --depth     9 \
-  --width     256 \
-  --skips     2 \
+  --depth     5 \
+  --width     512 \
+  --skips     0 \
   --nrm       False \
   --drpt      0 \
   --lr        1e-4 \

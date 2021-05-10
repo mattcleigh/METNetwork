@@ -2,63 +2,81 @@ import numpy as np
 from scipy.interpolate import interp1d
 import matplotlib.pyplot as plt
 
+class BiasFunction(object):
+    def __init__(self, bias):
+        self.k = (1-bias)**3
+        self.ret_id = True if bias == 0 else False
+        self.ret_0  = True if bias == 1 else False
+    def apply(self, x):
+        if self.ret_id: return x
+        if self.ret_0: return 0*x
+        return (x * self.k) / (x * self.k - x + 1 ) ## Convex shape
+
+
+def chunk_given_size(a, size):
+    return np.split(a, np.arange(size,len(a),size))
+
+
 class Weight_Function(object):
 
-    def __init__( self, type, hist_file, max_weight_diff = 10 ):
+    def __init__( self, hist_file, wto, wratio, lin_shift ):
 
         ## Get the hisogram data from file
         source = np.loadtxt( hist_file, delimiter="," )
-        et_mu   = source[0, 1]
-        et_vals = source[1:,0]
-        et_hist = source[1:,1]
+        et_vals = source[:,0]
+        et_hist = source[:,1]
         bin_w   = et_vals[1] - et_vals[0]
+        coarse_weights = np.ones_like( et_vals )
+        self.f = None
+        self.thresh = None
 
-        ## If no sampling at all return 1
-        if type == "":
-            self.f = lambda x: x
-            self.max_weight = 1
+        ## Generate weights using the reciprocal function up to a certain value GeV
+        if wto > 0:
 
-        ## Generate weights using the reciprocal function, return the max possible weight for sampling
-        elif type[0] == "i":
-
-            ## Get the parameter from the type
-            weight_to = float(type[1:])
-
-            ## Calculate maximum allowed value of the weights the falling edge of the plat
-            max_weight = 1 / et_hist[ (np.abs(et_vals - weight_to*1000)).argmin() ]
+            ## Calculate maximum allowed value of the weights the falling edge of the plateau
+            max_weight = 1 / et_hist[ (np.abs(et_vals - 300*1000)).argmin() ]
 
             ## Calculate the weights for each bin, accounting for the maximum
             coarse_weights = np.clip( 1 / et_hist, None, max_weight )
 
-            ## Normalise the weights using their expectation value
-            coarse_weights /= np.sum( coarse_weights * et_hist * bin_w )
+            ## DELETE THIS
+            weight_at_to = coarse_weights[ (np.abs(et_vals - wto*1000)).argmin() ]
+            coarse_weights = np.where( et_vals < wto*1000, weight_at_to, coarse_weights )
 
-            ## Turn the coarse weights into a function and recalculate the new max value used for sampling
-            self.f = interp1d( et_vals, coarse_weights, kind="linear", bounds_error=False, fill_value=tuple(coarse_weights[[0,-1]]) )
-            self.max_weight = np.max( coarse_weights )
-            self.sweight = self.max_weight / max_weight_diff
+        ## Modify the coarse weights using a linear shift, make sure that m is scaled!
+        if lin_shift != 0:
 
-        # ## Generate weights using a linear shift, return the max possible weight for sampling
-        # elif type[0] == "m":
-        #     m = float(type[1:]) / et_mu
-        #     self.f = lambda x: m * ( x - et_mu ) + 1
-        #     self.max_weight = max( self.f(et_bins)  ) ## The max weight is based on the limits of the fit
-        #
-        # elif type[0] == "b":
-        #     ## Do the same for i
-        #     weight_to = 100
-        #     coarse_weights = 1 / et_hist / et_bins[-1]
-        #     inertp = interp1d( et_bins, coarse_weights, kind="cubic", bounds_error=False, fill_value=tuple(coarse_weights[[0,-1]]) )
-        #     self.max_weight = inertp( 1000 * weight_to ) ## The max weight is based on where we want to do the fit up to
-        #     func = lambda x: np.where( inertp(x) < self.max_weight, inertp(x), self.max_weight )
-        #
-        #     ## Calculate expectation value of new histogram using sum approximate of integral
-        #     et_mu = np.sum( et_bins * func(coarse_weights) ) * ( et_bins[2] - et_bins[1] )
-        #
-        #     ## Do same for m
-        #     m = float(type[1:]) / et_mu
-        #     self.f = lambda x: ( m * ( x - et_mu ) + 1 ) * func(x)
-        #     self.max_weight = max( self.f(et_bins)  ) ## The max weight is based on the limits of the fit
+            ## Calculate a gradient corresponding to inputs between -1 and 1
+            m = lin_shift / ( et_vals[-1] )
+
+            ## Multiply the weights by the weights by a linear function passing through 0.5 in the mid
+            coarse_weights *= np.clip( m * ( et_vals - et_vals[-1]/2 ) + 0.5, 0.0, 1)
+
+        ## Calculate the weight treshold (v rndm vs loss ^) using the desired weight ratio
+        thresh = np.max( coarse_weights ) * wratio
+
+        ## The two weight types, clipped from above and below
+        rndm_weights = np.clip( coarse_weights, None, thresh )
+        loss_weights = np.clip( coarse_weights, thresh, None )
+
+        ## Normalise the rndm weights as long as the threshold is reachable
+        if thresh > 0: rndm_weights /= np.sum( rndm_weights * et_hist * bin_w )
+        else:          rndm_weights  = 1
+
+        ## Next we get the normalisation factor for the loss weights
+        norm_fac = np.sum( loss_weights * rndm_weights * et_hist * bin_w )
+
+        ## But we apply the normalistion factor to the origonal weights!
+        coarse_weights /= norm_fac
+        thresh /= norm_fac
+
+        ## Can now derive the function using linear interpolation, we also save the threshold
+        self.f = interp1d( et_vals,
+                           coarse_weights,
+                           kind="linear",
+                           bounds_error=False,
+                           fill_value=tuple(coarse_weights[[0,-1]]) )
+        self.thresh = thresh
 
     def apply(self, true_et):
         return self.f( true_et )

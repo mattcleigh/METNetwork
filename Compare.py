@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 
 from Resources import Plotting as myPL
 
-spec = "turbo"
+spec = "rainbow"
 cmap = plt.get_cmap(spec)
 
 def learning_plot( file_list ):
@@ -15,95 +15,148 @@ def learning_plot( file_list ):
     fig = plt.figure( figsize = (10,5) )
     ax  = fig.add_subplot(111)
 
+    ## Iterate through the files in the list
     for i, f in enumerate(file_list):
         previous_data = np.loadtxt( f+"train_hist.csv" )
         c = cmap( (i+0.5) / len(file_list) )
-        plt.plot( previous_data[:,0].tolist(), "-" , color = c, label=f )
+
+        ## Plot the training and validation losses
+        plt.plot( previous_data[:,0].tolist(), "-" , color = c )
         plt.plot( previous_data[:,1].tolist(), "--", color = c )
 
     plt.legend()
     plt.show()
 
+def hist_plot( df ):
+
+    ## Calculate the bins to use for the histogram
+    bins = np.histogram( [], bins=50, range=[0,400] )[1]
+
+    ## Cycle through the samples in the dataframe
+    for i, (index, row) in enumerate(df.iterrows()):
+        name = index
+
+        ## Pull out only the histogram array from the dataframe row
+        hist = row.values[ df.columns.str.contains("hist") ]
+
+        ## The label for the graph is based on the index or the variables
+        if index in [ "Tight", "Truth" ]:
+            name = index
+        else:
+            name = "{}_{}_{}".format( row.weight_to, row.weight_shift, row.weight_ratio )
+
+        ## Normalise the histogram
+        hist = hist / np.sum(hist)
+
+        ## Get the colour (truth in black) and plot the step function
+        c = cmap( (i+0.5) / len(df) ) if index != "Truth" else "k"
+        plt.plot( bins, np.insert(hist,0,0), "-", color=c, label=name )
+
+    ## Setup the the labels and limits of the plot
+    plt.ylabel( "Normalised Histogram" )
+    plt.xlabel( "Reconstructed MET [GeV]" )
+    plt.xlim(left=0)
+    plt.ylim(bottom=0)
+    # plt.yscale('log')
+    plt.tight_layout()
+    plt.legend()
+    plt.show()
+
 def metric_plot( df, metrics, cols ):
 
-    ## Make the MET plots
-    for met in metrics:
+    ## The x-axis bin centers for the plots
+    x_vals = np.linspace(2, 398, 50)
 
-        ## Read the appropriate columns
-        data = df.loc[ : , df.columns.str.contains(met) ]
+    ## Cycle through the requested metrics
+    for met in metrics:
 
         ## Create figure
         fig = plt.figure( figsize = (10,5) )
-        ax  = fig.add_subplot(111)
+        ax = fig.add_subplot(111)
         fig.suptitle(met)
 
-        k = 0
-        for i in range(len(df))[::-1]:
-            x_vals = np.linspace(10, 390, 20) ## Bin centers for the metric plots
-            row = data.iloc[i]
+        ## Cycle through the dataframe
+        for i, (index, row) in enumerate(df.iterrows()):
+            name = index
 
-            # if df.iloc[i]["weight_to"] == 0:
-                # x_vals = np.linspace(20, 380, 10)
-                # row = data.iloc[i][:11]
+            ## Pull out the metric array from the row (first is group average)
+            vals = row.values[ df.columns.str.contains(met) ][1:]
 
-            name = df.iloc[i].name[5:]
-            print(name)
-            if len(name) != 4 and len(name)!=1:
+            # The label for the graph is based on the index or the variables
+            if index == "Tight":
+                name = index
+            ## Dont plot truth on a metric plot!
+            elif index == "Truth":
                 continue
+            else:
+                name = "{}_{}_{}".format( row.weight_to, row.weight_shift, row.weight_ratio )
 
-            label = name #str( list( df.iloc[i][cols[:-2]] ) )
+            ## Get the colour and make the plot
+            c = cmap( (i+0.5) / len(df) )
+            ax.plot( x_vals, vals, "-o", color=c, label=name )
 
-            ax.plot( x_vals, row.to_numpy()[1:], "x-", color=cmap( (k+0.5) / 4 ), label=label )
-            k += 1
-            break
+        ## Work out the limits and labels for the plots
         ax.axhline(0, color="k")
         ax.axvline(0, color="k")
         ax.set_xlim(left=0)
-        ax.set_ylim(top=0.5)
-        ax.set_ylim(bottom=-0.2)
         if met!="DLin":
             ax.set_ylim(bottom=0)
+        else:
+            ax.set_ylim(top=0.5)
+            ax.set_ylim(bottom=-0.2)
+        ax.set_ylabel(met)
+        ax.set_xlabel("True MET [GeV]")
         ax.legend()
         ax.grid()
     plt.show()
 
 def main():
 
-    input_search = "../Saved_Networks/Small_Flat/*/"
-    order = "bias"
+    input_search = "../Saved_Networks/FlatSearch/*/"
+    order = "Res-1"
     N = 0
     restrict = [
-                # ( "depth",  9 ),
-                # ( "width",  256 ),
-                # ( "nrm",    False ),
-                # ( "lr",     1e-3 ),
-                # ( "do_rot", True )
+                # ( "batch_size",  2048 ),
+                # ( "width",  1024 ),
+                # ( "nrm",    True ),
+                # ( "lr",     1e-4 ),
+                # ( "do_rot", True ),
+                # ( "weight_to", -300 ),
+                # ( "weight_ratio", 0 ),
+                # ( "weight_shift", 0 ),
                 ]
-    include = [ "Tight_" ]
+    include = True
 
     ## Find all the networks
     file_list = glob.glob( input_search )
 
-    ## Combine all dataframes, add bias column, invert weight (less twisty), apply restrictions, order df, select best N
-    df = pd.concat( [ pd.read_csv(f+"perf.csv", index_col=0) for f in file_list+include ] ).fillna(0)
-    df["bias"] = np.square(df.loc[:, df.columns.str.contains("DLin")].drop(["DLin-1", "DLin0"], axis=1)).mean(axis=1)
+    ## Combine all dataframes, add bias column, invert weight (less twisty)
+    df = pd.concat( [ pd.read_csv(f+"perf.csv", index_col=0) for f in file_list ] ).fillna(0)
+    df["bias"] = np.square(df.loc[:, df.columns.str.contains("DLin")].drop(("DLin"+str(i) for i in range(-1,10)), axis=1)).mean(axis=1)
     df["weight_to"] *= -1
-    for flag, value in restrict:
-        df = df[ df[flag] == value ]
-    df = df.sort_values( order, ascending=True )
-    if N != 0: df = df[:N]
+
+    for flag, value in restrict: df = df[ df[flag] == value ]     ## Only show dataframes matching restrictions
+    if order != "": df = df.sort_values( order, ascending=True )  ## Order the dataframes w.r.t. some variable
+    if N != 0: df = df[:N]                                        ## Select only the first N variables
+
+    ## Add in tight
+    if include:
+        df = pd.concat( [ df, pd.read_csv("Tight_perf.csv", index_col=0) ] ).fillna(0)
 
     ## Create the parallel coordinate plot
     cols    = [ "do_rot", "batch_size", "depth", "width",
                 "skips", "nrm", "lr", "weight_to", "bias", "Loss-1" ]
-    # myPL.parallel_plot( df, cols, "Res-1", curved=True, cmap=spec )
+    myPL.parallel_plot( df, cols, "Res-1", curved=True, cmap=spec )
 
     ## Create the metric plots
-    metrics = [ "DLin"  ] ## [ "Loss", "Res", "Mag", "Ang", "DLin" ]
+    metrics = [ "DLin", "Loss", "Res", "Mag" ]
     metric_plot( df, metrics, cols )
 
     ## Make the learning plots
     # learning_plot( file_list )
+
+    ## Do the histogram plot
+    hist_plot( df )
 
 
 
