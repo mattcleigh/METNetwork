@@ -5,15 +5,30 @@ import matplotlib
 from matplotlib import ticker
 import matplotlib.pyplot as plt
 
+def save_hist2D( hist, name, box, ln_coords = [] ):
+    fig = plt.figure(figsize=(5, 5))
+    ax = fig.add_subplot(111)
+    ax.imshow( np.log(hist+1), origin='lower', extent = box )
+    if len(ln_coords) > 0:
+        ax.plot( *ln_coords, "k-" )
+    ax.set_xlabel( "True MET [GeV]" )
+    ax.set_ylabel( "Network MET [GeV]" )
+    plt.tight_layout()
+    fig.savefig( name )
+
+
 class loss_plot(object):
-    def __init__(self, title = ""):
+    def __init__(self, title = "", xlbl = "", ylbl = ""):
 
         self.fig = plt.figure( figsize = (5,5) )
         self.ax  = self.fig.add_subplot(111)
+        self.ax.set_xlabel(xlbl)
+        self.ax.set_ylabel(ylbl)
         self.fig.suptitle(title)
 
         self.trn_line, = self.ax.plot( [], "-r", label="Train" )
         self.tst_line, = self.ax.plot( [], "-g", label="Test" )
+        plt.tight_layout()
 
     def _update(self, trn_data, tst_data):
         if len(trn_data)<2:
@@ -134,3 +149,37 @@ def parallel_plot(df,cols,rank_attr,cmap='Spectral',spread=None,curved=False,cur
     plt.show()
 
     return x,valmat
+
+class scatter_plot(object):
+    def __init__(self, title = "", xlbl = "", ylbl = ""):
+
+        self.fig = plt.figure( figsize = (5,5) )
+        self.ax  = self.fig.add_subplot(111)
+        self.fig.suptitle(title)
+        self.ax.set_xlabel(xlbl)
+        self.ax.set_ylabel(ylbl)
+        plt.tight_layout()
+
+        self.trt_scat, = self.ax.plot( [], "go", alpha=0.4, label="Truth" )
+        self.out_scat, = self.ax.plot( [], "ro", alpha=0.4, label="Output" )
+
+        self.ax.set_xlim([-3,7])
+        self.ax.set_ylim([-5,5])
+
+    def _update(self, b_out, b_truth):
+
+        self.trt_scat.set_data( *b_truth.T.tolist() )
+        self.out_scat.set_data( *b_out.T.tolist() )
+
+        # self.ax.relim()
+        # self.ax.autoscale_view()
+        # self.ax.legend()
+
+    def draw(self, *args ):
+        self._update( *args )
+        self.fig.canvas.draw()
+        self.fig.canvas.flush_events()
+
+    def save(self, fname, *args):
+        self._update(*args)
+        self.fig.savefig(fname)

@@ -67,6 +67,11 @@ def get_args():
                          help = "The batch size",
                          required = True )
 
+    parser.add_argument( "--n_workers",
+                         type = int,
+                         help = "The number of worker threads to prepare the batches",
+                         required = True )
+
     parser.add_argument( "--depth",
                          type = int,
                          help = "The number of hidden layers in the MLP",
@@ -97,9 +102,14 @@ def get_args():
                          help = "The optimiser learning rate / step size",
                          required = True )
 
-    parser.add_argument( "--n_workers",
-                         type = int,
-                         help = "The number of worker threads to prepare the batches",
+    parser.add_argument( "--grad_clip",
+                         type = float,
+                         help = "Maximum value of the batch gradient norm",
+                         required = True )
+
+    parser.add_argument( "--skn_weight",
+                         type = float,
+                         help = "The relative weight of the Sinkhorn loss",
                          required = True )
 
     return parser.parse_args()
@@ -113,9 +123,9 @@ def print_args( args ):
 def pass_blacklist( args ):
 
     blacklist = [
-                    ( "depth", 9,   "width", 1024 ),
-                    ( "depth", 5,   "width", 256 ),
-                    ( "skips", 0,   "width", 256 ),
+                    # ( "depth", 9,   "width", 1024 ),
+                    # ( "depth", 5,   "width", 256 ),
+                    # ( "skips", 0,   "width", 256 ),
     ]
 
     for a1, v1, a2, v2 in blacklist:
@@ -146,15 +156,18 @@ def main():
                          batch_size = args.bsize, n_workers = args.n_workers )
 
     ## Initialise the network
-    model.setup_network( act = nn.LeakyReLU(0.1),
+    model.setup_network( act = nn.SiLU(),
                          depth = args.depth, width = args.width, skips = args.skips,
                          nrm = args.nrm, drpt = args.drpt )
 
     ## Setup up the parameters for training
-    model.setup_training( loss_fn = nn.SmoothL1Loss( reduction="none" ), lr = args.lr )
+    model.setup_training( loss_fn = nn.SmoothL1Loss( reduction="none" ),
+                          lr = args.lr,
+                          grad_clip = args.grad_clip,
+                          skn_weight = args.skn_weight )
 
     ## Run the training loop
-    model.run_training_loop( max_epochs = 1000, patience = 10, sv_every = 1000 )
+    model.run_training_loop( max_epochs = 1000, patience = 20, sv_every = 1 )
 
 if __name__ == '__main__':
     main()

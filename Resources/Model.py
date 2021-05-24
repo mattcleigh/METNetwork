@@ -1,11 +1,13 @@
 from Resources import Plotting as myPL
 from Resources import Networks as myNN
 from Resources import Datasets as myDS
+from Resources import Utils as myUT
 
 import time
 import shutil
 import numpy as np
 import pandas as pd
+import geomloss as gl
 import matplotlib.pyplot as plt
 
 from tqdm import tqdm
@@ -27,6 +29,7 @@ class METNET_Agent(object):
         ## How to setup the bins for performance metrics
         self.n_bins = 50
         self.bin_max = 400
+        self.bin_max2D = 200
 
     def setup_dataset( self, data_dir, do_rot,
                              weight_to, weight_ratio, weight_shift,
@@ -44,24 +47,22 @@ class METNET_Agent(object):
 
         ## Build the list of files that will be used in the train and validation set
         train_files, valid_files = myDS.buildTrainAndValidation( self.data_dir, v_frac )
-        self.n_train_files = len(train_files)
-        self.n_valid_files = len(valid_files)
 
         ## Get the iterable dataset objects
         train_set = myDS.StreamMETDataset( train_files, n_ofiles, chnk_size, hist_file, weight_to, weight_ratio, weight_shift )
         valid_set = myDS.StreamMETDataset( valid_files, n_ofiles, chnk_size, hist_file, weight_to, weight_ratio, weight_shift )
+        self.n_train_files = len(train_files)
+        self.n_valid_files = len(valid_files)
 
         ## Create the pytorch dataloaders (works for both types of datset)
         self.train_loader = DataLoader( train_set,
                                         drop_last   = True,                                ## Causes errors with batch norm if batch = 1
                                         batch_size  = batch_size,                          ## Set by training script
-                                        sampler     = train_set.sampler,                   ## Is always None for iterable dataset
                                         num_workers = min(self.n_train_files, n_workers),  ## Dont want dead workers if not enough files
                                         pin_memory  = True )                               ## Improves CPU->GPU transfer times
         self.valid_loader = DataLoader( valid_set,
                                         drop_last   = True,
                                         batch_size  = batch_size,
-                                        sampler     = valid_set.sampler,
                                         num_workers = min(self.n_valid_files, n_workers),
                                         pin_memory  = True )
 
@@ -83,7 +84,7 @@ class METNET_Agent(object):
         ## Creating the neural network
         self.network = myNN.MET_MLP( "res_mlp", n_in, act, depth, width, skips, nrm, drpt )
 
-    def setup_training( self, loss_fn, lr ):
+    def setup_training( self, loss_fn, lr, grad_clip, skn_weight ):
         """ Sets up variables used for training, including the optimiser
         """
         ## Update our information dictionary
@@ -92,26 +93,44 @@ class METNET_Agent(object):
         ## Initialise the optimiser
         self.optimiser = optim.Adam( self.network.parameters(), lr=lr )
 
-        ## The history of train losses, epoch times etc ...
+        ## The sinkhorn loss
+        self.do_skn = ( skn_weight > 0 )
+        self.dist_loss = gl.SamplesLoss( "sinkhorn", p=2, blur=0.01 )
+
+        ## The history of train and validation losses
         self.trn_hist = []
         self.vld_hist = []
-        self.tim_hist = []
         self.epochs_trained = 0
 
-        self.loss_plot = myPL.loss_plot( self.name )
+        ## The graphs for the loss terms
+        self.tot_loss_plot = myPL.loss_plot( title = self.name, xlbl = "Epoch", ylbl = "total loss" )
+        self.rec_loss_plot = myPL.loss_plot( title = self.name, xlbl = "Epoch", ylbl = "reconstruction loss" )
+        self.skn_loss_plot = myPL.loss_plot( title = self.name, xlbl = "Epoch", ylbl = "sinkhorn loss" )
 
-    def _train_epoch( self ):
+    def _epoch( self, is_train = False ):
         """ This function performs one epoch of training on data provided by the train_loader
             It will also update the graphs after a certain number of batches pass
         """
         ## Put the nework into training mode (for batch_norm/droput)
-        self.network.train()
-        running_loss = 0
+        if is_train:
+            flag = "Training"
+            loader = self.train_loader
+            T.enable_grad()
+            self.network.train()
+        else:
+            flag = "Testing"
+            loader = self.valid_loader
+            self.network.eval()
+            T.no_grad()
 
-        for i, (inputs, targets, weights) in enumerate( tqdm( self.train_loader, desc="Training", ncols=80 ) ):
+        running_loss = np.zeros(3)
+        # plt.ion()
+        # splot = myPL.scatter_plot( xlbl = "Scaled x component", ylbl = "Scaled y component" )
+        for i, (inputs, targets, weights) in enumerate( tqdm( loader, desc=flag, ncols=80 ) ):
 
             ## Zero out the gradients
-            self.optimiser.zero_grad()
+            if is_train:
+                self.optimiser.zero_grad()
 
             ## Move data to the network device (GPU)
             inputs = inputs.to(self.network.device)
@@ -121,37 +140,37 @@ class METNET_Agent(object):
             ## Calculate the network output
             outputs = self.network( inputs )
 
-            ## Calculate the batch loss
-            loss = ( self.loss_fn( outputs, targets ).mean( dim=1 ) * weights ).mean()
+            ## Calculate the weighted batch reconstruction loss
+            rec_loss = ( self.loss_fn( outputs, targets ).mean( dim=1 ) * weights ).mean()
+            # exit()
 
-            ## Calculate the gradients
-            loss.backward()
+            ## Calculate the sinkhorn loss if required
+            skn_loss = T.zeros_like(rec_loss)
+            if self.do_skn:
+                skn_loss = T.clamp( self.dist_loss( outputs, targets ), 0, 2 )
 
-            ## Update the parameters
-            self.optimiser.step()
+            ## Combine the losses
+            tot_loss = rec_loss + self.skn_weight * skn_loss
 
-            ## Track the running loss
-            running_loss += loss.item()
+            ## Calculate the gradients and update the parameters
+            if is_train:
+                tot_loss.backward()
+                if self.grad_clip > 0: nn.utils.clip_grad_norm_( self.network.parameters(), self.grad_clip )
+                self.optimiser.step()
+                # if (i+1)%50==0:
+                    # splot.save( "flat"+str(i), outputs.cpu(), targets.cpu() )
 
-        ## Update loss history and epoch counter
-        self.trn_hist.append( running_loss / (i+1) ) ## Divide by i as we dont include final (unfilled) batches
-        self.epochs_trained += 1
+            ## Update the running loss
+            new_loss = np.array( [ tot_loss.item(), rec_loss.item(), skn_loss.item() ] )
+            running_loss = myUT.update_avg( running_loss, new_loss, i+1 )
 
-    def _test_epoch(self):
-        """ This function performs one epoch of testing on data provided by the validation loader
-        """
 
-        with T.no_grad():
-            self.network.eval()
-            running_loss = 0
-            for i, (inputs, targets, weights) in enumerate( tqdm( self.valid_loader, desc="Testing ", ncols=80 ) ):
-                inputs = inputs.to(self.network.device)
-                targets = targets.to(self.network.device)
-                weights = weights.to(self.network.device)
-                outputs = self.network( inputs )
-                loss = ( self.loss_fn( outputs, targets ).mean( dim=1 ) * weights ).mean()
-                running_loss += loss.item()
-            self.vld_hist.append( running_loss / (i+1) ) ## Divide by i as we dont include final (unfilled) batches
+        ## Calculate the mean of the losses (by i) and update
+        if is_train:
+            self.trn_hist.append( list( running_loss ) )
+            self.epochs_trained += 1
+        else:
+            self.vld_hist.append( list( running_loss ) )
 
     def run_training_loop( self, max_epochs = 10, patience = 20, sv_every = 20 ):
         """ This is the main loop which cycles epochs of train and test
@@ -168,24 +187,30 @@ class METNET_Agent(object):
             e_start_time = time.time()
 
             ## Run the test/train cycle
-            self._train_epoch()
-            self._test_epoch()
+            self._epoch( is_train = True )
+            self._epoch( is_train = False )
 
-            ## Shuffle the file order in the datasets (does nothing for map-style datasets)
+            ## Shuffle the file order in the datasets
             self.train_loader.dataset.shuffle_files()
             self.valid_loader.dataset.shuffle_files()
 
             ## For time keeping
-            self.tim_hist.append( time.time() - e_start_time )
+            epoch_time = time.time() - e_start_time
 
-            ## Printing loss
-            print( "Average loss on training set:   {:.5}".format( self.trn_hist[-1] ) )
-            print( "Average loss on validaiton set: {:.5}".format( self.vld_hist[-1] ) )
-            print( "Epoch Time: {:.5}".format( self.tim_hist[-1] ) )
+            ## Printing the various losses
+            print( "Average losses on training set:" )
+            print( " - reconstr: {:.5f}".format( self.trn_hist[-1][1] ) )
+            print( " - sinkhorn: {:.5f}".format( self.trn_hist[-1][2] ) )
+
+            print( "Average losses on validation set:" )
+            print( " - reconstr: {:.5f}".format( self.vld_hist[-1][1] ) )
+            print( " - sinkhorn: {:.5f}".format( self.vld_hist[-1][2] ) )
+
+            print( "Epoch Time: {:.5f}".format( epoch_time ) )
 
             ## Calculate the best epoch and the number of bad epochs
-            self.best_epoch = np.argmin(self.vld_hist) + 1
-            self.bad_epochs = len(self.vld_hist) - self.best_epoch
+            self.best_epoch = np.argmin( np.array(self.vld_hist)[:, 0] ) + 1
+            self.bad_epochs = len( self.vld_hist ) - self.best_epoch
 
             ## At the end of every epoch we save something, even if it is just logging
             self.save()
@@ -217,12 +242,6 @@ class METNET_Agent(object):
 
         ## The full name of the save directory
         full_name = Path( self.save_dir, self.name )
-
-        ## Our first ever call to this function should remove the contents of the directory and recreate
-        if self.epochs_trained == 1:
-            if full_name.exists():
-                print("Deleting files!")
-                shutil.rmtree(full_name)
         full_name.mkdir(parents=True, exist_ok=True)
 
         ## Save the network and optimiser tensors for the latest, best and checkpoint versions
@@ -243,10 +262,18 @@ class METNET_Agent(object):
             f.write( "\n\n"+str(self.optimiser) )
             f.write( "\n" ) ## One line for whitespace
 
-        ## Save the loss history, epoch times, and a png of the graph
-        hist_array = np.transpose( np.vstack(( self.trn_hist, self.vld_hist, self.tim_hist )) )
+        ## Save the loss history
+        hist_array = np.concatenate( [self.trn_hist, self.vld_hist], axis=-1 )
         np.savetxt( Path( full_name, "train_hist.csv" ), hist_array )
-        self.loss_plot.save( self.trn_hist, self.vld_hist, Path( full_name, "loss.png" ) )
+
+        ## Calculate the losses as numpy arrays for slicing
+        trn = np.array( self.trn_hist )
+        vld = np.array( self.vld_hist )
+
+        ## Save the loss plots
+        self.tot_loss_plot.save( trn[:, 0], vld[:, 0], Path( full_name, "loss_tot.png" ) )
+        self.rec_loss_plot.save( trn[:, 1], vld[:, 1], Path( full_name, "loss_rec.png" ) )
+        self.skn_loss_plot.save( trn[:, 2], vld[:, 2], Path( full_name, "loss_skn.png" ) )
 
         ## Save a copy of the stat file in the network directory: Only on the first iteration!
         if self.epochs_trained==1:
@@ -269,10 +296,9 @@ class METNET_Agent(object):
 
         ## Load the train history
         previous_data = np.loadtxt( Path( full_name, "train_hist.csv" ) )
-        self.trn_hist = previous_data[:,0].tolist()
-        self.vld_hist = previous_data[:,1].tolist()
-        self.tim_hist = previous_data[:,2].tolist()
-        self.best_epoch = np.argmin(self.vld_hist) + 1
+        self.trn_hist = previous_data[:,:3].tolist()
+        self.vld_hist = previous_data[:,3:].tolist()
+        self.best_epoch = np.argmin( np.array(self.vld_hist)[:, 0] ) + 1
         self.epochs_trained = len(self.trn_hist)
 
     def save_perf( self ):
@@ -286,8 +312,10 @@ class METNET_Agent(object):
         met_names  = [ "Loss", "Res", "Mag", "Ang", "DLin" ]
         run_totals = np.zeros( ( 1+self.n_bins, 1+len(met_names) ) ) ## rows = (total, bin1, bin2...) x cols = (n_events, *met_names)
 
-        ## The also build a histogram of the output magnitude
-        hist = np.zeros( self.n_bins )
+        ## Build a 1D and 2D histogram of the output magnitude
+        hist1D = np.zeros( self.n_bins )
+        hist2D = np.zeros( (self.n_bins, self.n_bins) )
+        outp2D = np.zeros( (self.n_bins, self.n_bins) )
 
         ## Iterate through the validation set
         with T.no_grad():
@@ -326,8 +354,12 @@ class METNET_Agent(object):
                 for b in range(self.n_bins):
                     run_totals[b+1] += batch_totals[ bins==b ].sum(axis=0).cpu().numpy()
 
-                ## Fill in the reconstructed magnitude histogram
-                hist += np.histogram( outp_mag.cpu(), bins=self.n_bins, range=[0,self.bin_max] )[0]
+                ## Fill in the magnitude histograms
+                hist1D += np.histogram( outp_mag.cpu().tolist(), bins=self.n_bins, range=[0,self.bin_max] )[0]
+                hist2D += np.histogram2d( outp_mag.cpu().tolist(), targ_mag.cpu().tolist(),
+                                          bins=self.n_bins, range=[[0,self.bin_max2D], [0,self.bin_max2D]] )[0]
+                outp2D += np.histogram2d( real_outp[:, 1].cpu().tolist(), real_outp[:, 0].cpu().tolist(),
+                                          bins=self.n_bins, range=[[-200, 200], [-200,400]] )[0]
 
         ## Include the totals over the whole dataset by summing and placing it in the first location
         run_totals[0] = run_totals.sum(axis=0, keepdims=True)
@@ -349,14 +381,21 @@ class METNET_Agent(object):
         mdf = pd.DataFrame( data=metrics, index=[self.name], columns=mcols )
 
         ## Expand, label and convert the histogram to a dataframe
-        hist = np.expand_dims(hist, 0)
+        hist1D = np.expand_dims(hist1D, 0)
         hcols = [ "hist"+str(i) for i in range(self.n_bins) ]
-        hdf = pd.DataFrame( data=hist, index=[self.name], columns=hcols )
+        hdf = pd.DataFrame( data=hist1D, index=[self.name], columns=hcols )
 
         ## Write the combined dataframe to the csv
         df = pd.concat( [ mdf, hdf, self.get_info() ], axis=1 ) ## Combine the performance dataframe with info on the network
         fnm = Path( self.save_dir, self.name, "perf.csv" )
         df.to_csv( fnm, mode="w" )
+
+        ## Save the 2D histogram to the output folder
+        hnm = Path( self.save_dir, self.name, "hist2d.png" )
+        myPL.save_hist2D( hist2D, hnm, [0, self.bin_max2D, 0, self.bin_max2D ], [[0,self.bin_max2D],[0,self.bin_max2D]] )
+
+        hnm = Path( self.save_dir, self.name, "outp2d.png" )
+        myPL.save_hist2D( outp2D, hnm, [-100, 500, -200, 200 ], [[-100,500],[0,0]] )
 
         ## Turn the sampler back on for the validation set
         self.valid_loader.dataset.weight_on()
@@ -384,6 +423,7 @@ class METNET_Agent(object):
                     "drpt",
                     "loss_fn",
                     "lr",
+                    "skn_weight",
                     "epochs_trained",
                     "best_epoch" ]
         data = [[ self.__dict__[c] for c in columns ]]

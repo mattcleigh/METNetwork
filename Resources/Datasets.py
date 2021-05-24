@@ -37,17 +37,35 @@ def buildTrainAndValidation( data_dir, test_frac ):
 
 class StreamMETDataset(IterableDataset):
     def __init__(self, file_list, n_ofiles, chnk_size, hist_file, weight_to, weight_ratio, weight_shift ):
-        """ An iterable dataset for when the trainin set is too large to hold in memory.
-            It defines a buffer for each thread which reads in chunks from a set number of files.
-            Minimal memory footprint. Unlike the mapable dataset, this has no sampler attribute.
-            Instead the retrieval of samples is built directly in the iter method.
+        """ An iterable dataset for when the training set is too large to hold in memory.
+
+            Works with multithreading:
+             - Each thread has a assigned multiple hdf files that it will work on over the epoch (its worker_files).
+                - Each thread selects a set number of files to have open at a time (its ofiles_list).
+                    - Each thread reads a chunk from each of its open files to fill a buffer which is shuffled.
+                        - Each thread then iterates through the buffer
+                    - When the buffer is empty the thread loads new chucks from its o_files
+                - When the o_files are empty then it opens a new set from its file list
+             - When the file list is empty then the thread is finished for its epoch
+
+            Minimal memory footprint. Amount of data stored in memory at given time is:
+                - sample_size x chunk_size x n_ofiles x n_threads
+                                 ^  ( buffer_size ) ^
+        Args:
+            file_list: A python list of file names (with directories) to open for the epoch
+            n_ofiles:  An int of the number of files to read from simultaneously
+                       Larger n_ofiles means that the suffling between epochs is closer to a real shuffling
+                       of the dataset, but it will result in more memory used.
+            chnk_size: The size of the chunk to read from each of the ofiles.
+            other:     Arguments solely for the Weight_Function class
+
         """
 
-        ## Make attributes from all arguments
+        ## Class attributes
         self.file_list    = file_list
         self.n_ofiles     = n_ofiles
         self.chnk_size    = chnk_size
-        self.weight_exist = ( weight_to + weight_shift ) > 0
+        self.weight_exist = ( weight_to + weight_shift ) != 0 ## This is fixed for all training
         self.do_weights   = self.weight_exist ## This is toggled on and off for validation
 
         ## We load the function that calculates weight based on True Et
@@ -58,10 +76,6 @@ class StreamMETDataset(IterableDataset):
         for file in tqdm( self.file_list, desc="Collecting Files", ncols=80, unit="" ):
             with h5py.File( file, 'r' ) as hf:
                 self.n_samples += len(hf["data/table"])
-
-        ## Setting the unwanted attributes to dataloader defaults so that we have same interface as METDataset
-        self.sampler = None
-        self.shuffle = False
 
     def __len__(self):
         return self.n_samples
@@ -103,14 +117,14 @@ class StreamMETDataset(IterableDataset):
                     break
 
                 ## Iterate through the batches taken from the buffer
-                for sample in buffer: ## sample is [inputs, targx, targy, weight]
+                for sample in buffer: ## sample is [inputs, targT, targx, targy, weight]
 
                     ## Get the input, target, and sample weight
-                    inputs  = sample[:-3]
+                    inputs  = sample[:-4]
                     targets = sample[-3:-1]
                     weight  = sample[-1]
 
-                    ## We return with weight one if no weighting is applied
+                    ## Always return with weight=1 if no weighting is applied
                     if not self.do_weights:
                         yield inputs, targets, 1
 
@@ -141,10 +155,9 @@ class StreamMETDataset(IterableDataset):
             ## If the chunk is not empty we add it to the buffer
             if len(chunk) != 0:
 
-                ## Replace the last column from True_Et miss values to weights based on those values
-                if self.do_weights:
-                    chunk[:, -1] = self.WF.apply( chunk[:, -1] )
-
+                ## Add a column of weights to the chunk based on True_ET magnitude
+                ws = self.WF.apply( chunk[:, -3:-2] ) if self.do_weights else np.ones( (len(chunk),1) )
+                chunk = np.concatenate( [chunk, ws.astype("float32") ], axis=-1 )
                 buffer.append(chunk)
 
         ## If the buffer is empty it means that no files had any data left ("not list" is a quicker python way to check if empty)

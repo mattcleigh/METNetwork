@@ -2,6 +2,17 @@ import numpy as np
 from scipy.interpolate import interp1d
 import matplotlib.pyplot as plt
 
+def update_avg( old, new, i ):
+    return old + ( new - old ) / i
+
+def print_grad_norm( model ):
+    total_norm = 0
+    for p in model.parameters():
+        param_norm = p.grad.data.norm(2)
+        total_norm += param_norm.item() ** 2
+    total_norm = total_norm ** (1. / 2)
+    print( total_norm )
+
 class BiasFunction(object):
     def __init__(self, bias):
         self.k = (1-bias)**3
@@ -34,14 +45,15 @@ class Weight_Function(object):
         if wto > 0:
 
             ## Calculate maximum allowed value of the weights the falling edge of the plateau
-            max_weight = 1 / et_hist[ (np.abs(et_vals - 300*1000)).argmin() ]
+            max_weight = 1 / et_hist[ (np.abs(et_vals - wto*1000)).argmin() ]
 
             ## Calculate the weights for each bin, accounting for the maximum
             coarse_weights = np.clip( 1 / et_hist, None, max_weight )
 
             ## DELETE THIS
-            weight_at_to = coarse_weights[ (np.abs(et_vals - wto*1000)).argmin() ]
-            coarse_weights = np.where( et_vals < wto*1000, weight_at_to, coarse_weights )
+            # peak = et_vals[np.argmin(coarse_weights)]
+            # weight_at_peak = np.min(coarse_weights)
+            # coarse_weights = np.where( et_vals < peak, weight_at_peak, coarse_weights )
 
         ## Modify the coarse weights using a linear shift, make sure that m is scaled!
         if lin_shift != 0:
@@ -77,6 +89,7 @@ class Weight_Function(object):
                            bounds_error=False,
                            fill_value=tuple(coarse_weights[[0,-1]]) )
         self.thresh = thresh
+
 
     def apply(self, true_et):
         return self.f( true_et )

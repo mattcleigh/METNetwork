@@ -54,8 +54,8 @@ def main():
     if output_path.exists(): shutil.rmtree(output_path)
     output_path.mkdir(parents=True)
 
-    ## Read all csv files in the input folder into a dask dataframe (set blocksize to 64Mb)
-    df = dd.read_csv( args.input_dir + "*.csv", assume_missing=True, blocksize=64e6 ) ## Missing means that 0 is a float
+    ## Read all csv files in the input folder into a dask dataframe (set blocksize to 48Mb)
+    df = dd.read_csv( args.input_dir + "/*/*.csv", assume_missing=True, blocksize=48e6 ) ## Missing means that 0 is a float
     col_names = list(df.columns)
 
     #### We histogram the dataset based on its True ET miss distribution ####
@@ -63,14 +63,13 @@ def main():
     n_bins = 300
 
     ## Create the histogram
-    mags = da.sqrt(df["True_EX"]**2 + df["True_EY"]**2)
-    hist, bins = da.histogram(mags, bins=n_bins, range=[0, h_max], density=True )
+    hist, bins = da.histogram(df["True_ET"], bins=n_bins, range=[0, h_max], density=True )
     mid_bins = ( bins[:-1] + bins[1:] ) / 2
     hist = hist.compute()
 
     ## Save the histogram as an image and as a csv
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize = (8,5) )
-    ax1.step( mid_bins, hist, where = "mid" )
+    fig, ax = plt.subplots(1, 1, figsize = (8,5) )
+    ax.step( mid_bins, hist, where = "mid" )
     fig.savefig( Path( output_path, "hist.png" ) )
     np.savetxt( Path( output_path, "hist.csv" ), np.vstack((mid_bins, hist)).T, delimiter="," )
 
@@ -117,11 +116,10 @@ def main():
     ## Normalise the dataframe
     normed = (df - mean) / (sdev+1e-6)
 
-    ## After normalisation can add the True ET back in (unnormed), this is needed for weight calculation!
-    normed["True_ET"] = mags
-    col_names += ["True_ET"]
+    ## Replace the (unormed) True ET back in
+    normed["True_ET"] = df["True_ET"]
 
-    ## The column orders change when we normalise (?), we fix this and also cast to float
+    ## The column orders change when we normalise (?), we fix this and cast to float
     normed = normed[col_names].astype("float32")
 
     ## Save the normalised dataframe to HDF files using the data table

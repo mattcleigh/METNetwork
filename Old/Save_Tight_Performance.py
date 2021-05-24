@@ -13,12 +13,13 @@ from torch.utils.data import DataLoader
 import torch.nn.functional as F
 
 from Resources import Datasets as myDS
+from Resources import Plotting as myPL
 
 cmap = plt.get_cmap("turbo")
 
 def main():
 
-    inpt_folder =  "../Data/Rotated/"
+    inpt_folder =  "../Data/METData/Rotated/"
 
     ## Defining the histogram
     n_bins = 50
@@ -29,7 +30,7 @@ def main():
     hist_file = inpt_folder + "hist.csv"
 
     dataset = myDS.StreamMETDataset( inpt_files, 32, 1024, hist_file, 0, 0, 0 )
-    loader = DataLoader( dataset, drop_last=False, batch_size=4096, sampler=dataset.sampler, num_workers=4, pin_memory=True )
+    loader = DataLoader( dataset, drop_last=False, batch_size=4096, num_workers=4, pin_memory=True )
 
     ## Loading the stats
     stat_file = inpt_folder + "stats.csv"
@@ -44,6 +45,7 @@ def main():
     ## Include the histograms for tight and truth
     tight_h = np.zeros( n_bins )
     truth_h = np.zeros( n_bins )
+    truth2D = np.zeros( (n_bins, n_bins) )
 
     for (inputs, targets, weights) in tqdm( loader, desc="Performance", ncols=80, unit="" ):
 
@@ -59,7 +61,7 @@ def main():
         outp_mag = real_outp[:,0]
 
         ## Get the bin numbers from the true met magnitude (final bin includes overflow)
-        bins = T.clamp( targ_mag / (bin_max/n_bins), 0, n_bins-1 ).int().numpy()
+        bins = T.clamp( targ_mag*n_bins/bin_max, 0, n_bins-1 ).int().numpy()
 
         ## Calculate the batch totals of each metric
         batch_totals = T.zeros( ( len(inputs), 1+len(met_names) ) )
@@ -79,6 +81,8 @@ def main():
         ## Fill in the reconstructed magnitude histogram
         tight_h += np.histogram( outp_mag, bins=n_bins, range=[0,bin_max] )[0]
         truth_h += np.histogram( targ_mag, bins=n_bins, range=[0,bin_max] )[0]
+        truth2D += np.histogram2d( real_targ[:, 1].cpu().tolist(), real_targ[:, 0].cpu().tolist(),
+                                   bins=n_bins, range=[[-200, 200], [-100,500]] )[0]
 
     ## Include the totals over the whole dataset by summing and placing it in the first location
     run_totals[0] = run_totals.sum(axis=0, keepdims=True)
@@ -109,8 +113,8 @@ def main():
     ## Write the combined dataframe to the csv
     tight_df = pd.concat( [ mdf, tight_df ], axis = 1 )
     df = pd.concat( [ tight_df, truth_df ] ).fillna(0) ## Combine the performance dataframe with info on the network
-    print(df)
 
+    myPL.save_hist2D( truth2D, "truth2D.png", [-100, 500, -200, 200 ], [[-100,500],[0,0]] )
 
     df.to_csv( "Tight_perf.csv", mode="w" )
 

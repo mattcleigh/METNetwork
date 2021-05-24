@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 
 from Resources import Plotting as myPL
 
-spec = "rainbow"
+spec = "viridis"
 cmap = plt.get_cmap(spec)
 
 def learning_plot( file_list ):
@@ -24,7 +24,7 @@ def learning_plot( file_list ):
         plt.plot( previous_data[:,0].tolist(), "-" , color = c )
         plt.plot( previous_data[:,1].tolist(), "--", color = c )
 
-    plt.legend()
+    # plt.legend()
     plt.show()
 
 def hist_plot( df ):
@@ -40,21 +40,21 @@ def hist_plot( df ):
         hist = row.values[ df.columns.str.contains("hist") ]
 
         ## The label for the graph is based on the index or the variables
-        if index in [ "Tight", "Truth" ]:
-            name = index
-        else:
-            name = "{}_{}_{}".format( row.weight_to, row.weight_shift, row.weight_ratio )
+        # if index not in [ "Tight", "Truth" ]:
+            # name = "{}_{}".format( row.weight_to, row.skn_weight )
 
         ## Normalise the histogram
         hist = hist / np.sum(hist)
 
         ## Get the colour (truth in black) and plot the step function
-        c = cmap( (i+0.5) / len(df) ) if index != "Truth" else "k"
+        c = cmap( (i+1) / (len(df)-2) )
+        if index == "Truth": c = "k"
+        if index == "Tight": c = "b"
         plt.plot( bins, np.insert(hist,0,0), "-", color=c, label=name )
 
     ## Setup the the labels and limits of the plot
     plt.ylabel( "Normalised Histogram" )
-    plt.xlabel( "Reconstructed MET [GeV]" )
+    plt.xlabel( "MET Magnitude [GeV]" )
     plt.xlim(left=0)
     plt.ylim(bottom=0)
     # plt.yscale('log')
@@ -78,21 +78,20 @@ def metric_plot( df, metrics, cols ):
         ## Cycle through the dataframe
         for i, (index, row) in enumerate(df.iterrows()):
             name = index
+            if index == "Truth":
+                continue
 
             ## Pull out the metric array from the row (first is group average)
             vals = row.values[ df.columns.str.contains(met) ][1:]
 
             # The label for the graph is based on the index or the variables
-            if index == "Tight":
-                name = index
-            ## Dont plot truth on a metric plot!
-            elif index == "Truth":
-                continue
-            else:
-                name = "{}_{}_{}".format( row.weight_to, row.weight_shift, row.weight_ratio )
+            # if index not in [ "Tight", "Truth" ]:
+                # name = "{}_{}".format( row.weight_to, row.skn_weight )
 
             ## Get the colour and make the plot
-            c = cmap( (i+0.5) / len(df) )
+            c = cmap( (i+1) / (len(df)-2) )
+            if index == "Truth": c = "k"
+            if index == "Tight": c = "b"
             ax.plot( x_vals, vals, "-o", color=c, label=name )
 
         ## Work out the limits and labels for the plots
@@ -112,7 +111,7 @@ def metric_plot( df, metrics, cols ):
 
 def main():
 
-    input_search = "../Saved_Networks/FlatSearch/*/"
+    input_search = "../Saved_Networks/Comp/*/"
     order = "Res-1"
     N = 0
     restrict = [
@@ -124,6 +123,7 @@ def main():
                 # ( "weight_to", -300 ),
                 # ( "weight_ratio", 0 ),
                 # ( "weight_shift", 0 ),
+                # ( "skn_weight", 0 ),
                 ]
     include = True
 
@@ -132,7 +132,7 @@ def main():
 
     ## Combine all dataframes, add bias column, invert weight (less twisty)
     df = pd.concat( [ pd.read_csv(f+"perf.csv", index_col=0) for f in file_list ] ).fillna(0)
-    df["bias"] = np.square(df.loc[:, df.columns.str.contains("DLin")].drop(("DLin"+str(i) for i in range(-1,10)), axis=1)).mean(axis=1)
+    df["bias"] = np.square(df.loc[:, df.columns.str.contains("DLin")].drop(("DLin"+str(i) for i in range(-1,6)), axis=1)).mean(axis=1)
     df["weight_to"] *= -1
 
     for flag, value in restrict: df = df[ df[flag] == value ]     ## Only show dataframes matching restrictions
@@ -144,12 +144,11 @@ def main():
         df = pd.concat( [ df, pd.read_csv("Tight_perf.csv", index_col=0) ] ).fillna(0)
 
     ## Create the parallel coordinate plot
-    cols    = [ "do_rot", "batch_size", "depth", "width",
-                "skips", "nrm", "lr", "weight_to", "bias", "Loss-1" ]
-    myPL.parallel_plot( df, cols, "Res-1", curved=True, cmap=spec )
+    cols    = [ "weight_to", "weight_shift", "weight_ratio" ]
+    # myPL.parallel_plot( df, cols, "bias", curved=True, cmap=spec )
 
     ## Create the metric plots
-    metrics = [ "DLin", "Loss", "Res", "Mag" ]
+    metrics = [ "DLin", "Res" ]
     metric_plot( df, metrics, cols )
 
     ## Make the learning plots
