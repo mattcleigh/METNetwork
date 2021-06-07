@@ -50,10 +50,10 @@ class Weight_Function(object):
             ## Calculate the weights for each bin, accounting for the maximum
             coarse_weights = np.clip( 1 / et_hist, None, max_weight )
 
-            ## DELETE THIS
-            # peak = et_vals[np.argmin(coarse_weights)]
-            # weight_at_peak = np.min(coarse_weights)
-            # coarse_weights = np.where( et_vals < peak, weight_at_peak, coarse_weights )
+            ## DELETE THIS (MAYBE...)
+            peak = et_vals[np.argmin(coarse_weights)]
+            weight_at_peak = np.min(coarse_weights)
+            coarse_weights = np.where( et_vals < peak, weight_at_peak, coarse_weights )
 
         ## Modify the coarse weights using a linear shift, make sure that m is scaled!
         if lin_shift != 0:

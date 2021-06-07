@@ -9,7 +9,7 @@ class MET_MLP(nn.Module):
         The network also can have skip arcs
     """
 
-    def __init__( self, name, n_in, act, depth, width, skips, nrm, drpt ):
+    def __init__( self, name, n_in, act, depth, width, skips, nrm, drpt, dev = None ):
         super(MET_MLP, self).__init__()
 
         ## Defining the network features
@@ -18,7 +18,11 @@ class MET_MLP(nn.Module):
                                          skips=skips, act_h=act, nrm=nrm, drpt=drpt )
 
         ## Moving the network to the device
-        self.device = T.device("cuda" if T.cuda.is_available() else "cpu")
+        if dev is None:
+            self.device = T.device("cuda" if T.cuda.is_available() else "cpu")
+        else:
+            self.device = T.device(dev)
+
         self.to(self.device)
 
         print("\nNetwork structure: {}".format(self.name))

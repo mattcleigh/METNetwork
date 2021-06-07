@@ -10,8 +10,8 @@ class mlp_block(nn.Module):
             inpt = n_in if d==0 else width
             block.append( nn.Linear( inpt, width ) )
             if act is not None: block.append( act )
-            if drpt>0:          block.append( nn.Dropout( p=drpt ) )
             if nrm:             block.append( nn.LayerNorm( width ) )
+            if drpt>0:          block.append( nn.Dropout( p=drpt ) )
         self._ = nn.Sequential(*block)
 
     def forward(self, input):

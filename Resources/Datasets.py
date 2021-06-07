@@ -20,8 +20,7 @@ def buildTrainAndValidation( data_dir, test_frac ):
 
     ## Exit if no files can be found
     if len(file_list) == 0:
-        print("No files could be found with the search tag: ", data_dir, "*.h5" )
-        exit()
+        raise LookupError("No files could be found with the search tag: ", data_dir, "*.h5" )
 
     ## Shuffle with the a set random seed
     np.random.seed(0)
@@ -29,7 +28,6 @@ def buildTrainAndValidation( data_dir, test_frac ):
 
     ## Split the file list according to the test_frac
     n_test  = np.clip( int(round(len(file_list)*test_frac)), 1, len(file_list)-1 )
-    n_train = len(file_list) - n_test
     train_files = file_list[:-n_test]
     test_files  = file_list[-n_test:]
 

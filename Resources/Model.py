@@ -72,17 +72,17 @@ class METNET_Agent(object):
         print( "Train set:       {:10} samples in {:4} files".format( self.train_size, self.n_train_files ) )
         print( "Validation set:  {:10} samples in {:4} files".format( self.valid_size, self.n_valid_files ) )
 
-    def setup_network( self, act, depth, width, skips, nrm, drpt ):
+    def setup_network( self, act, depth, width, skips, nrm, drpt, dev = None ):
         """ This initialises the mlp network structure
         """
         ## Update our information dictionary
         self.__dict__.update( (k,v) for k,v in vars().items() if k != "self" )
 
-        ## We get the number of inputs based on the pre-process
-        n_in = 74 if self.do_rot else 76
+        ## The number of inputs is fixed
+        n_in = 74
 
         ## Creating the neural network
-        self.network = myNN.MET_MLP( "res_mlp", n_in, act, depth, width, skips, nrm, drpt )
+        self.network = myNN.MET_MLP( "res_mlp", n_in, act, depth, width, skips, nrm, drpt, dev )
 
     def setup_training( self, loss_fn, lr, grad_clip, skn_weight ):
         """ Sets up variables used for training, including the optimiser
@@ -120,12 +120,10 @@ class METNET_Agent(object):
         else:
             flag = "Testing"
             loader = self.valid_loader
-            self.network.eval()
             T.no_grad()
+            self.network.eval()
 
         running_loss = np.zeros(3)
-        # plt.ion()
-        # splot = myPL.scatter_plot( xlbl = "Scaled x component", ylbl = "Scaled y component" )
         for i, (inputs, targets, weights) in enumerate( tqdm( loader, desc=flag, ncols=80 ) ):
 
             ## Zero out the gradients
@@ -142,12 +140,11 @@ class METNET_Agent(object):
 
             ## Calculate the weighted batch reconstruction loss
             rec_loss = ( self.loss_fn( outputs, targets ).mean( dim=1 ) * weights ).mean()
-            # exit()
 
             ## Calculate the sinkhorn loss if required
             skn_loss = T.zeros_like(rec_loss)
             if self.do_skn:
-                skn_loss = T.clamp( self.dist_loss( outputs, targets ), 0, 2 )
+                skn_loss = self.dist_loss( outputs, targets )
 
             ## Combine the losses
             tot_loss = rec_loss + self.skn_weight * skn_loss
@@ -157,13 +154,10 @@ class METNET_Agent(object):
                 tot_loss.backward()
                 if self.grad_clip > 0: nn.utils.clip_grad_norm_( self.network.parameters(), self.grad_clip )
                 self.optimiser.step()
-                # if (i+1)%50==0:
-                    # splot.save( "flat"+str(i), outputs.cpu(), targets.cpu() )
 
             ## Update the running loss
             new_loss = np.array( [ tot_loss.item(), rec_loss.item(), skn_loss.item() ] )
             running_loss = myUT.update_avg( running_loss, new_loss, i+1 )
-
 
         ## Calculate the mean of the losses (by i) and update
         if is_train:
@@ -284,15 +278,17 @@ class METNET_Agent(object):
             print("\nImprovement detected! Saving additional information")
             self.save_perf()
 
-    def load( self, flag ):
+    def load( self, flag, get_opt = True ):
 
         ## Get the name of the directories
         full_name = Path( self.save_dir, self.name )
         model_folder = Path( full_name, "models" )
 
         ## Load the network and optimiser
-        self.network.load_state_dict(   T.load( Path( model_folder, "net_"+flag ) ) )
-        self.optimiser.load_state_dict( T.load( Path( model_folder, "opt_"+flag ) ) )
+        self.network.load_state_dict( T.load( Path( model_folder, "net_"+flag ) ) )
+
+        if get_opt:
+            self.optimiser.load_state_dict( T.load( Path( model_folder, "opt_"+flag ) ) )
 
         ## Load the train history
         previous_data = np.loadtxt( Path( full_name, "train_hist.csv" ) )
