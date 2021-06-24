@@ -1,0 +1,11 @@
+Metadata-Version: 2.1
+Name: METNetwork
+Version: 0.1
+Summary: Training and evaluating the METNetwork
+Home-page: https://github.com/mattcleigh/METNetwork.git
+Author: Matthew Leigh
+License: MIT
+Description: Training and evaluating the METNetwork
+        
+Platform: UNKNOWN
+Description-Content-Type: text/markdown
