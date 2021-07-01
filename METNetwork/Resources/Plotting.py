@@ -5,52 +5,54 @@ import matplotlib
 from matplotlib import ticker
 import matplotlib.pyplot as plt
 
+class io_plot:
+    """
+    A plot that can be updated interactively using the draw and save method
+    All inheriting objects need to impliment a _update method
+    """
+    def draw(self, *args, **kwargs):
+        self._update(*args, **kwargs)
+        self.fig.canvas.draw()
+        self.fig.canvas.flush_events()
+
+    def save(self, fname, *args, **kwargs):
+        self._update(*args, **kwargs)
+        self.fig.savefig(fname)
+
+class loss_plot(io_plot):
+    """
+    A dual plot for train and validation
+    """
+    def __init__(self, ylabel='', xlabel='epoch'):
+        self.fig = plt.figure(figsize=(5,5))
+        self.ax = self.fig.add_subplot(111)
+        self.ax.set_ylabel(ylabel)
+        self.ax.set_xlabel(xlabel)
+        self.trn_line, = self.ax.plot([], '-r', label='Train')
+        self.vld_line, = self.ax.plot([], '-g', label='Valid')
+
+    def _update(self, trn_data, vld_data):
+        self.trn_line.set_data(1+np.arange(len(trn_data)), trn_data)
+        self.vld_line.set_data(1+np.arange(len(vld_data)), vld_data)
+        self.ax.legend()
+        self.ax.relim()
+        self.ax.autoscale_view()
+        self.fig.tight_layout()
+
 def save_hist2D( hist, name, box, ln_coords = [] ):
     fig = plt.figure(figsize=(5, 5))
     ax = fig.add_subplot(111)
     ax.imshow( np.log(hist+1), origin='lower', extent = box )
     if len(ln_coords) > 0:
-        ax.plot( *ln_coords, "k-" )
-    ax.set_xlabel( "True MET [GeV]" )
-    ax.set_ylabel( "Network MET [GeV]" )
+        ax.plot( *ln_coords, 'k-' )
+    ax.set_xlabel( 'True MET [GeV]' )
+    ax.set_ylabel( 'Network MET [GeV]' )
     plt.tight_layout()
     fig.savefig( name )
 
-class loss_plot(object):
-    def __init__(self, title = "", xlbl = "", ylbl = ""):
-
-        self.fig = plt.figure( figsize = (5,5) )
-        self.ax  = self.fig.add_subplot(111)
-        self.ax.set_xlabel(xlbl)
-        self.ax.set_ylabel(ylbl)
-        self.fig.suptitle(title)
-
-        self.trn_line, = self.ax.plot( [], "-r", label="Train" )
-        self.tst_line, = self.ax.plot( [], "-g", label="Test" )
-        plt.tight_layout()
-
-    def _update(self, trn_data, tst_data):
-
-        x_data = np.arange(len(trn_data))
-        self.trn_line.set_data( x_data, trn_data )
-        self.tst_line.set_data( x_data, tst_data )
-
-        self.ax.relim()
-        self.ax.autoscale_view()
-        self.ax.legend()
-
-    def draw(self, trn_data, tst_data):
-        self._update(trn_data, tst_data)
-        self.fig.canvas.draw()
-        self.fig.canvas.flush_events()
-
-    def save(self, trn_data, tst_data, fname):
-        self._update(trn_data, tst_data)
-        self.fig.savefig(fname)
-
-
 def parallel_plot(df,cols,rank_attr,cmap='Spectral',spread=None,curved=False,curvedextend=0.1):
-    '''Produce a parallel coordinates plot from pandas dataframe with line colour with respect to a column.
+    """
+    Produce a parallel coordinates plot from pandas dataframe with line colour with respect to a column.
     Required Arguments:
         df: dataframe
         cols: columns to use for axes
@@ -61,7 +63,8 @@ def parallel_plot(df,cols,rank_attr,cmap='Spectral',spread=None,curved=False,cur
         curved: Spline interpolation along lines
         curvedextend: Fraction extension in y axis, adjust to contain curvature
     Returns:
-        x coordinates for axes, y coordinates of all lines'''
+        x coordinates for axes, y coordinates of all lines
+    """
     colmap = matplotlib.cm.get_cmap(cmap)
     cols = cols + [rank_attr]
 
@@ -121,7 +124,7 @@ def parallel_plot(df,cols,rank_attr,cmap='Spectral',spread=None,curved=False,cur
         tick_labels = []
         for a in ax_info[col][0]:
             if isinstance(a, float):
-                tick_labels.append("{:.5}".format(a))
+                tick_labels.append('{:.5}'.format(a))
             else:
                 tick_labels.append(a)
 
@@ -148,7 +151,7 @@ def parallel_plot(df,cols,rank_attr,cmap='Spectral',spread=None,curved=False,cur
     return x,valmat
 
 class scatter_plot(object):
-    def __init__(self, title = "", xlbl = "", ylbl = ""):
+    def __init__(self, title = '', xlbl = '', ylbl = ''):
 
         self.fig = plt.figure( figsize = (5,5) )
         self.ax  = self.fig.add_subplot(111)
@@ -157,8 +160,8 @@ class scatter_plot(object):
         self.ax.set_ylabel(ylbl)
         plt.tight_layout()
 
-        self.trt_scat, = self.ax.plot( [], "go", alpha=0.4, label="Truth" )
-        self.out_scat, = self.ax.plot( [], "ro", alpha=0.4, label="Output" )
+        self.trt_scat, = self.ax.plot( [], 'go', alpha=0.4, label='Truth' )
+        self.out_scat, = self.ax.plot( [], 'ro', alpha=0.4, label='Output' )
 
         self.ax.set_xlim([-3,7])
         self.ax.set_ylim([-5,5])

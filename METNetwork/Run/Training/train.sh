@@ -1,23 +1,22 @@
 python Train.py \
   --name      normal \
-  --save_dir  ../../../../Saved_Networks/tmp/ \
-  --data_dir  ../../../../Data/METData/ \
-  --do_rot    True \
-  --weight_to  300 \
-  --weight_ratio 0.1 \
-  --weight_shift 0.0 \
+  --save_dir  /home/matthew/Documents/PhD/Saved_Networks/tmp/ \
+  --data_dir  /home/matthew/Documents/PhD/Data/METData/Rotated/ \
   --v_frac    0.5 \
   --n_ofiles  32 \
   --chnk_size 1024 \
-  --bsize     1024 \
-  --n_workers 2 \
+  --weight_to  300 \
+  --weight_ratio 0.0 \
+  --weight_shift 0.0 \
+  --act       lrlu \
   --depth     5 \
   --width     256 \
-  --skips     0 \
   --nrm       True \
   --drpt      0.0 \
+  --loss_nm   hbloss \
+  --opt_nm    adam \
   --lr        1e-4 \
   --grad_clip 2 \
   --skn_weight 0.5 \
-  --cut_calo False \
-  --cut_track False \
+  --b_size    1024 \
+  --n_workers 0 \

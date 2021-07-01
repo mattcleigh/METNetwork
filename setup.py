@@ -16,9 +16,13 @@ setup(
     install_requires=[
         'matplotlib',
         'numpy',
+        'scipy',
         'torch',
         'tqdm',
         'pandas',
+        'dask',
+        'h5py',
+        'pytables',
     ],
     dependency_links=[],
 )
