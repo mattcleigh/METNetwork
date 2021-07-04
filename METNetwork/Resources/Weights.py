@@ -1,3 +1,4 @@
+import random
 import numpy as np
 from scipy.interpolate import interp1d
 
@@ -31,17 +32,12 @@ class SampleWeight:
         bin_w = et_vals[1] - et_vals[0] ## Bin width, used for expectation values
 
         ## Calculate maximum allowed value of the weights calculated at w_to
-        max_weight = 1 / et_hist[ (np.abs(et_vals - w_to)).argmin() ]
+        max_weight = 1.0/et_hist[(np.abs(et_vals-w_to)).argmin()]
 
         ## Calculate the weights for each bin, clipping at the maximum
         weights = np.clip(1.0/et_hist, None, max_weight)
 
-        ## DELETE THIS (MAYBE...)
-        # peak = et_vals[np.argmin(weights)]
-        # weight_at_peak = np.min(weights)
-        # weights = np.where(et_vals < peak, weight_at_peak, weights)
-
-        ## Modify the coarse weights using a linear shift, make sure that m is scaled!
+        ## Modify the weights using a linear shift, make sure that m is scaled!
         if w_shf:
 
             ## Calculate a gradient corresponding to inputs between -1 and 1, preventing any negative weights!
@@ -72,10 +68,10 @@ class SampleWeight:
         self.f = interp1d(et_vals, weights, kind="linear", bounds_error=False, fill_value=tuple(weights[[0,-1]]))
         self.thresh = thresh
 
-    def apply(self, true_et):
+    def apply(self, truth):
 
         ## Currently only supprts weights based on true magnitude
-        true_mag = true_et[0]
+        true_mag = truth[0]
         weight = self.f(true_mag)
 
         ## If the weight is greater then the threshold then we return it for the loss

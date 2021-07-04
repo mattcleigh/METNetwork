@@ -79,7 +79,7 @@ class StreamMETDataset(IterableDataset):
         self.var_list = inpt_list + ['True_EX', 'True_EY', 'Raw_True_ET', 'Raw_True_EX', 'Raw_True_EY']
 
         ## Booleans indicating whether we need to be calculating and applying event weights
-        self.weights_exit = bool(weight_to) or bool(weight_shift) ## Fixed for duration of the class
+        self.weight_exist = bool(weight_to) or bool(weight_shift) ## Fixed for duration of the class
         self.do_weights = True ## Toggled on and off for performance testing
 
         ## Iterate through a files and calculate the number of events
@@ -89,7 +89,7 @@ class StreamMETDataset(IterableDataset):
                 self.n_samples += len(hf['data/table'])
 
         ## Initialise a class which calculates a per event weight based on a True ET miss histogram file (in same folder as data)
-        if self.weights_exit:
+        if self.weight_exist:
             hist_file = Path(file_list[0].parent.absolute(), 'hist.csv')
             self.SW = myWT.SampleWeight(hist_file, weight_to, weight_ratio, weight_shift)
 
@@ -137,21 +137,24 @@ class StreamMETDataset(IterableDataset):
                 ## Fill the buffer with the next set of chunks from the files
                 buffer = self.load_chunks(ofiles, c_count)
 
+                ## If the returned buffer is empty there are no more events in these files!
+                if not buffer.nelement():
+                    break
+
                 ## Iterate through the batches taken from the buffer
                 for sample in buffer:
 
                     ## Read the information contained in the sample
                     inputs  = sample[:-5]
                     targets = sample[-5:-3]
-                    true_et = sample[-3:]
+                    truth = sample[-3:]
 
-                    ## Perform the weighted sampling
-                    if self.do_weights:                   ## Are we applying weights to our samples
-                        weight = self.SW.apply(true_et)   ## Calculate the weight (0 if it failed the random threshold)
-                        if weight:                        ## Yield the sample with the calculated weight
-                            yield inputs, targets, weight ## Note that if this fails, then no sample is yeilded (skipped)
-                    else:                                 ## Otherwise if we are not doing weights
-                        yield inputs, targets, 1          ## Then always return the sample with weight = 1
+                    ## Calculate the weight (1 by default, 0 if failed random threshold)
+                    weight = self.SW.apply(truth) if self.do_weights else 1
+
+                    ## Yield the event if the weight it is non-zero (skips the event otherwise)
+                    if weight:
+                        yield inputs, targets, weight
 
     def load_chunks(self, files, c_count):
 

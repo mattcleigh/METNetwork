@@ -83,11 +83,6 @@ def get_args():
                          help = "The drop-out probability for each hidden layer",
                          required = True )
 
-    parser.add_argument( "--loss_nm",
-                         type = str,
-                         help = "The name of the loss function to use for regression",
-                         required = True )
-
     parser.add_argument( "--opt_nm",
                          type = str,
                          help = "The name of the optimiser to use",
@@ -98,14 +93,24 @@ def get_args():
                          help = "The optimiser learning rate / step size",
                          required = True )
 
+    parser.add_argument( "--reg_loss_nm",
+                         type = str,
+                         help = "The name of the loss function to use for regression",
+                         required = True )
+
+    parser.add_argument( "--dst_loss_nm",
+                         type = str,
+                         help = "The name of the loss function to use for distribution matching",
+                         required = True )
+
+    parser.add_argument( "--dst_weight",
+                         type = float,
+                         help = "The relative weight of the distribution matching loss",
+                         required = True )
+
     parser.add_argument( "--grad_clip",
                          type = float,
                          help = "Maximum value of the batch gradient norm",
-                         required = True )
-
-    parser.add_argument( "--skn_weight",
-                         type = float,
-                         help = "The relative weight of the Sinkhorn loss",
                          required = True )
 
     parser.add_argument( "--b_size",
@@ -183,7 +188,7 @@ def main():
     model.setup_network(args.act, args.depth, args.width, args.nrm, args.drpt)
 
     ## Setup up the parameters for training
-    model.setup_training(args.loss_nm, args.opt_nm, args.lr, args.grad_clip, args.skn_weight, args.b_size, args.n_workers)
+    model.setup_training(args.opt_nm, args.lr, args.reg_loss_nm, args.dst_loss_nm, args.dst_weight, args.grad_clip, args.b_size, args.n_workers)
 
     ## Run the training loop
     model.run_training_loop()

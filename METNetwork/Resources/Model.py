@@ -63,15 +63,15 @@ class METNET_Agent:
                                      depth=depth, width=width, act_h=act, nrm=nrm, drp=drpt)
 
         ## Save and register the statistics so they can be loaded with the network
-        stats = T.tensor(np.loadtxt(Path(self.data_dir, 'stats.csv'), skiprows=1, delimiter=','))
+        stats = T.tensor(np.loadtxt(Path(self.data_dir, 'stats.csv'), skiprows=1, delimiter=','), dtype=T.float32)
         self.net.register_buffer('preproc_stats', stats)
 
         ## Select the device and move the network
-        self.device = myUT.sel_device('cpu')
+        self.device = myUT.sel_device('auto')
         self.net.to(self.device)
         print(self.net)
 
-    def setup_training(self, loss_nm, opt_nm, lr, grad_clip, skn_weight, b_size, n_workers):
+    def setup_training(self, opt_nm, lr, reg_loss_nm, dst_loss_nm, dst_weight, grad_clip, b_size, n_workers):
         """
         Sets up variables used for training, including the optimiser
         """
@@ -82,9 +82,9 @@ class METNET_Agent:
         self.update_dict(locals())
 
         ## Initialise the regression and distribution loss functions
-        self.rec_loss_fn = myUT.get_loss(loss_nm)
-        self.skn_loss_fn = myUT.get_loss('snkhrn')
-        self.do_skn = bool(skn_weight)
+        self.reg_loss_fn = myUT.get_loss(reg_loss_nm)
+        self.dst_loss_fn = myUT.get_loss(dst_loss_nm)
+        self.do_dst = bool(dst_weight)
 
         ## Initialise the optimiser
         self.opt = myUT.get_opt(opt_nm, self.net.parameters(), lr)
@@ -95,7 +95,7 @@ class METNET_Agent:
         self.valid_loader = DataLoader(self.valid_set, **loader_kwargs)
 
         ## The history of the losses and their plots
-        hist_keys = ['tot_loss', 'rec_loss', 'skn_loss']
+        hist_keys = ['tot_loss', 'reg_loss', 'dst_loss']
         self.history = {prf+key:[] for key in hist_keys for prf in ['train_', 'valid_']}
         self.hist_plots = {key:myPL.loss_plot(ylabel=key) for key in hist_keys}
 
@@ -115,8 +115,8 @@ class METNET_Agent:
             print( '\nEpoch: {}'.format(epc) )
 
             ## Run the test/train cycle
-            self._epoch(is_train=True)
-            self._epoch(is_train=False)
+            # self._epoch(is_train=True)
+            # self._epoch(is_train=False)
 
             ## At the end of every epoch we save something, even if it is just logging
             self.save()
@@ -131,7 +131,7 @@ class METNET_Agent:
         print('\nMax number of epochs completed!')
         return 0
 
-    def _epoch( self, is_train = False ):
+    def _epoch(self, is_train = False):
         """
         This function performs one epoch of training on data provided by the train_loader
         It will also update the graphs after a certain number of batches pass
@@ -140,43 +140,46 @@ class METNET_Agent:
         if is_train:
             flag = 'train'
             loader = self.train_loader
-            T.enable_grad()
             self.net.train()
         else:
             flag = 'valid'
             loader = self.valid_loader
-            T.no_grad()
             self.net.eval()
 
-        ## Before each epoch we must shuffle the files order
+        ## Before each epoch we make sure weighting is enabled and the files are shuffled
+        T.set_grad_enabled(is_train)
+        loader.dataset.weight_on()
         loader.dataset.shuffle_files()
 
-        ## The running losses
-        rn_tot = 0
-        rn_rec = 0
-        rn_skn = 0
+        ## The running losses as a dictionary
+        ## These must correspond to the keys in self.history!!!
+        ## These must be updated during each batch pass!!!
+        run_loss = {'tot_loss':0, 'reg_loss':0, 'dst_loss':0}
 
-        for i, batch in enumerate(tqdm(loader, desc=flag, ncols=100, ascii=True)):
-            print(batch)
-            exit()
+        for i, batch in enumerate(tqdm(loader, desc=flag, ncols=80, ascii=True)):
+
             ## Zero out the gradients
             if is_train:
                 self.opt.zero_grad()
 
-            ## Move the batch to the network device and break into parts
+            ## Move the batch to the network device and break into parts (dont use true_et!)
             inputs, targets, weights = myUT.move_dev(batch, self.device)
 
             ## Calculate the network output
             outputs = self.net(inputs)
 
-            ## Calculate the weighted batch reconstruction loss
-            rec_loss = (self.loss_fn(outputs, targets).mean(dim=1)*weights).mean()
+            ## Calculate the weighted batch regression loss
+            # y_targ = T.abs(targets.T[1].detach())
+            # y_targ /= y_targ.mean()
 
-            ## Calculate the sinkhorn loss (if required)
-            skn_loss = self.dist_loss(outputs, targets) if self.do_skn else T.zeros_like(rec_loss)
+            # reg_loss = T.tensor(0, device=self.device)
+            reg_loss = (self.reg_loss_fn(outputs, targets).mean(dim=1)*weights).mean()
+
+            ## Calculate the distance matching loss (if required)
+            dst_loss = self.dst_loss_fn(outputs, targets) if self.do_dst else T.zeros_like(reg_loss)
 
             ## Combine the losses
-            tot_loss = rec_loss + self.skn_weight * skn_loss
+            tot_loss = reg_loss + self.dst_weight * dst_loss
 
             ## Calculate the gradients and update the parameters
             if is_train:
@@ -185,12 +188,10 @@ class METNET_Agent:
                 self.opt.step()
 
             ## Update the running losses
-            rn_tot = myUT.update_avg(rn_tot, tot_loss, i+1)
-            rn_rec = myUT.update_avg(rn_rec, rec_loss, i+1)
-            rn_skn = myUT.update_avg(rn_skn, skn_loss, i+1)
+            myUT.update_avg_dict(run_loss, (tot_loss.item(), reg_loss.item(), dst_loss.item()), i+1)
 
         ## Update the history of the network
-        self.update_history(flag, {'tot_loss':rn_tot, 'rec_loss':rn_rec, 'skn_loss':rn_skn})
+        self.update_history(flag, run_loss)
 
     def update_history(self, flag, h_dict):
         """
@@ -216,7 +217,7 @@ class METNET_Agent:
             - info.txt -> A file containing the network setup and description
             - loss.csv -> Recorded loss history of the training performance
             - loss.png -> (Several) plots of the recorded history
-        - When the network validation loss improves
+        - When the network validation loss improves (below is handled by the save_perf method)
             - perf.csv -> Pandas dataframe Performance metrics on the validation set for the best network
             - MagHist.csv -> 1D histogram of the reconstructed, tight and true magnitude
             - ExyHist.csv -> 2D histogram of the reconstructed, tight and true x, y outputs
@@ -239,7 +240,7 @@ class METNET_Agent:
             for k, v in self.__dict__.items():
                 if len(str(v)) > 50: continue ## Save shorter stings
                 f.write('{:15} = {}\n'.format(k, str(v)))
-            f.write('\n\n'+str(self.network))
+            f.write('\n\n'+str(self.net))
             f.write('\n\n'+str(self.opt))
             f.write('\n') ## One line for whitespace
 
@@ -275,146 +276,148 @@ class METNET_Agent:
     def save_perf(self):
         """
         This method iterates through the validation set, and in addition to calculating the loss, it also looks
-        at profiles using bins of True ETmiss.
+        at profiles using bins of True ETmiss. This is done both for Tight and for the Network.
         The binned variables are:
-            - Reconstruction loss
-            - Sinkhorn loss
             - Resolution (x, y)
-            - Andular Resolution
             - Deviation from linearity
-        These profiles are combined with infromation from the class dict to create a performance csv
+            - Angular Resolution
+        These profiles are combined with information from the class dict to create a performance csv.
+        This performance csv only has two lines: the column names and the values. This is so it can be combined
+        with results from other networks!
         We also create several a 1D and 2D histograms
-            - 1D histogram of the reconstructed, tight and true magnitude
-            - 2D histogram of the reconstructed, tight and true x, y outputs
+            - 1D histogram of the reconstructed and true et (post-processed)
+            - 2D histogram of the reconstructed and true x,y (raw)
         """
         print('\nImprovement detected! Saving additional information')
 
         ## The bin setup to use for the profiles
-        n_bins = 25
-        bin_max = 400 ## In GeV
+        n_bins = 40
+        m_bins = 400
+        bins = np.linspace(0, m_bins, n_bins+1)
+        bins2d = [ np.linspace(-2, 4, n_bins+1), np.linspace(-3, 3, n_bins+1) ]
+
+        targ_means = self.net.preproc_stats[0,-2:] ## The stats needed to unormalise the target space
+        targ_sdevs = self.net.preproc_stats[1,-2:]
 
         ## The performance metrics to be calculated are stored in a running total matrix
-        met_names  = [ 'Res', 'Rec', 'Skn', 'Ang', 'Lin' ]
-        run_totals = np.zeros((1+n_bins, 1+len(met_names))) ## rows = (total, bin1, bin2...) x cols = (n_events, *met_names)
+        met_names = [ 'Res', 'Lin', 'Ang' ]
+        r_idx = [1, 3] ## Which columns are root means as opposed to means (+1)
+        binned_totals = np.zeros((n_bins+1, len(met_names)+1), dtype=np.float64) ## rows = (total+bin1, bin2...) x cols = (n_events + *met_names)
 
         ## Build a 1D and 2D histogram of the output magnitude
-        hist1D = np.zeros(n_bins)
-        hist2D = np.zeros((n_bins, n_bins))
-        outp2D = np.zeros((n_bins, n_bins))
+        h_net_et = np.zeros(n_bins)
+        h_tru_et = np.zeros(n_bins)
+        h_net_xy = np.zeros((n_bins, n_bins))
+        h_tru_xy = np.zeros((n_bins, n_bins))
 
-        ## Iterate through the validation set
-        T.no_grad()
-        self.network.eval()
+        ## Configure pytorch, the network and the loader appropriately
+        T.set_grad_enabled(False)
+        self.net.eval()
         self.valid_loader.dataset.weight_off()
 
-        for batch in tqdm(self.valid_loader, desc='perfm', ncols=100, ascii=True):
+        all_outputs = []
+        all_targets = []
+        ## Iterate through the validation set
+        for batch in tqdm(self.valid_loader, desc='perfm', ncols=80, ascii=True):
 
-            ## Move the batch to the network device and break into parts
-            inputs, targets, weights = myUT.move_dev(batch, self.device)
+            ## Get the network outputs
+            inputs, targets = myUT.move_dev(batch[:-1], self.device)
             outputs = self.net(inputs)
 
-            ## Un-normalise the outputs and the targets
-            real_outp = (outputs*devs + means) / 1000 ## Convert to GeV (Dont like big numbers)
-            real_targ = (targets*devs + means) / 1000
+            all_outputs.append
+            all_targets.append
 
-            ## Calculate the magnitudes of the vectors
-            targ_mag = T.norm(real_targ, dim=1)
-            outp_mag = T.norm(real_outp, dim=1)
+            ## Undo the normalisation on the outputs and the targets
+            net_xy = (outputs * targ_sdevs + targ_means) / 1000
+            tru_xy = (targets * targ_sdevs + targ_means) / 1000
+            net_et = T.norm(net_xy, dim=1)
+            tru_et = T.norm(tru_xy, dim=1)
 
-            ## Get the bin numbers from the true met magnitude (final bin includes overflow)
-            bins = T.clamp( targ_mag * self.n_bins / self.bin_max, 0, self.n_bins-1 ).int().cpu().numpy()
+            ## Calculate the performance metrics
+            nev = T.ones_like(tru_et) ## For keeping track of how many events per bin
+            res = ((net_xy - tru_xy)**2).mean(dim=1)
+            lin = (net_et - tru_et) / (tru_et + 1e-8)
+            ang = T.acos( T.sum(net_xy*tru_xy, dim=1) / (net_et*tru_et+1e-8) )**2 ## Calculated using the dot product
 
-            ## Calculate the batch totals of each metric
-            batch_totals = T.zeros( ( len(inputs), 1+len(met_names) ) )
-            dot = T.sum( real_outp * real_targ, dim=1 ) / ( outp_mag * targ_mag + 1e-4 )
+            ## Combine the performance metrics into a single pandas dataframe
+            combined = T.vstack([nev, res, lin, ang]).T
+            df = pd.DataFrame(myUT.to_np(combined), columns=['n_events']+met_names)
 
-            batch_totals[:, 0] = T.ones_like(targ_mag)                                             ## Ones are for counting bins
-            batch_totals[:, 1] = F.smooth_l1_loss(outputs, targets, reduction='none').mean(dim=1)  ## Loss
-            batch_totals[:, 2] = ( ( real_outp - real_targ )**2 ).mean(dim=1)                      ## XY Resolution
-            batch_totals[:, 3] = ( outp_mag - targ_mag )**2                                        ## Magnitude Resolution
-            batch_totals[:, 4] = T.acos( dot )**2                                                  ## Angular resolution
-            batch_totals[:, 5] = ( outp_mag - targ_mag ) / ( targ_mag + 1e-4 )                     ## Deviation from Linearity
+            ## Add bins in True_ET, we do this manually so we can deal with overflow! No np.digitize!
+            df['True_ET_bins'] = myUT.to_np(T.clamp(tru_et*n_bins/m_bins, 0, n_bins-1).int())
 
-            ## Fill in running data by summing over each bin, bin 0 is reserved for dataset totals
-            for b in range(self.n_bins):
-                run_totals[b+1] += batch_totals[ bins==b ].sum(axis=0).cpu().numpy()
+            ## Now we make the profiles using groupby, and add to the running totals using the indices
+            groupby = df.groupby('True_ET_bins', as_index=False).sum().to_numpy()
+            binned_totals[groupby[:, 0].astype(int)+1] += groupby[:, 1:]
 
-            ## Fill in the magnitude histograms
-            hist1D += np.histogram( outp_mag.cpu().tolist(), bins=self.n_bins, range=[0,self.bin_max] )[0]
-            hist2D += np.histogram2d( outp_mag.cpu().tolist(), targ_mag.cpu().tolist(),
-                                      bins=self.n_bins, range=[[0,self.bin_max2D], [0,self.bin_max2D]] )[0]
-            outp2D += np.histogram2d( real_outp[:, 1].cpu().tolist(), real_outp[:, 0].cpu().tolist(),
-                                      bins=self.n_bins, range=[[-200, 200], [-200,400]] )[0]
+            ## We update the histograms
+            h_net_et += np.histogram(myUT.to_np(net_et), bins=bins)[0]
+            h_tru_et += np.histogram(myUT.to_np(tru_et), bins=bins)[0]
+            h_net_xy += np.histogram2d(*myUT.to_np(outputs).T[[0,1]], bins=bins2d)[0]
+            h_tru_xy += np.histogram2d(*myUT.to_np(targets).T[[0,1]], bins=bins2d)[0]
 
-        ## Include the totals over the whole dataset by summing and placing it in the first location
-        run_totals[0] = run_totals.sum(axis=0, keepdims=True)
-        run_totals[:,0] = np.clip( run_totals[:,0], 1, None ) ## Just incase some of the bins were empty, dont wana divide by 0
+        ## Get the set total and turn into means (and root means)
+        binned_totals[0] = binned_totals.sum(axis=0)
+        binned_totals = binned_totals / (binned_totals[:,0:1]+1e-8)
+        binned_totals[:, r_idx] = np.sqrt(binned_totals[:, r_idx])
 
-        ## Turn the totals into means or RMSE values
-        run_totals[:,1] = run_totals[:,1] / run_totals[:,0]            ## Want average per bin
-        run_totals[:,2] = np.sqrt( run_totals[:,2] / run_totals[:,0] ) ## Want RMSE per bin
-        run_totals[:,3] = np.sqrt( run_totals[:,3] / run_totals[:,0] ) ## Want RMSE per bin
-        run_totals[:,4] = np.sqrt( run_totals[:,4] / run_totals[:,0] ) ## Want RMSE per bin
-        run_totals[:,5] = run_totals[:,5] / run_totals[:,0]            ## Want average per bin
+        ## Flatten the metrics, drop the number of events, create names and make a dataframe
+        metrics = binned_totals[:,1:].flatten(order='F')
+        mcols = [ met+str(i) for met in met_names for i in range(-1, n_bins) ]
+        metric_df = pd.DataFrame( data=[metrics], index=[self.name], columns=mcols )
 
-        ## Flatten the metrics and drop the number of events in each bin
-        metrics = run_totals[:,1:].flatten(order='F')
-        metrics = np.expand_dims(metrics, 0)
-
-        ## Get the names of the columns and convert the metrics to a dataframe
-        mcols = [ met+str(i) for met in met_names for i in range(-1, self.n_bins) ]
-        mdf = pd.DataFrame( data=metrics, index=[self.name], columns=mcols )
-
-        ## Expand, label and convert the histogram to a dataframe
-        hist1D = np.expand_dims(hist1D, 0)
-        hcols = [ 'hist'+str(i) for i in range(self.n_bins) ]
-        hdf = pd.DataFrame( data=hist1D, index=[self.name], columns=hcols )
+        ## Get a dataframe from the class dict
+        dict_df = pd.DataFrame.from_dict([self.get_dict()]).set_index('name')
 
         ## Write the combined dataframe to the csv
-        df = pd.concat( [ mdf, hdf, self.get_info() ], axis=1 ) ## Combine the performance dataframe with info on the network
-        fnm = Path( self.save_dir, self.name, 'perf.csv' )
-        df.to_csv( fnm, mode='w' )
+        out_df = pd.concat([metric_df, dict_df], axis=1)
+        out_df.to_csv(Path(self.save_dir, self.name, 'perf.csv'), mode='w')
+
+        ## Normalise the magnitude histograms and save them to file
+        mid_bins =(bins[1:]+bins[:-1])/2
+        h_net_et /= np.sum(h_net_et)
+        h_tru_et /= np.sum(h_tru_et)
+        np.savetxt(Path(self.save_dir, self.name, 'hist_et.csv'), np.vstack([mid_bins, h_net_et, h_tru_et]).T)
+        fig = plt.figure( figsize=(8,4) )
+        ax = fig.add_subplot(111)
+        ax.plot(h_net_et)
+        ax.plot(h_tru_et)
+        fig.savefig(Path(self.save_dir, self.name, 'mplot.png'))
+        plt.close(fig)
+
+        ## Normalise the 2d histograms
+        h_net_xy /= np.sum(h_net_xy)
+        h_tru_xy /= np.sum(h_tru_xy)
+
+        fig = plt.figure( figsize=(8,4) )
+        ax1 = fig.add_subplot(121)
+        ax2 = fig.add_subplot(122)
+        ax1.imshow(h_net_xy.T)
+        ax2.imshow(h_tru_xy.T)
+        fig.savefig(Path(self.save_dir, self.name, 'plot.png'))
+        plt.show()
+        # plt.close(fig)
+
+        test = myPL.projectiontion2D_ndarray(x, y, z)
+        print(test)
+
+        exit()
+        # plt.show()
+        # exit()
 
         ## Save the 2D histogram to the output folder
-        hnm = Path( self.save_dir, self.name, 'hist2d.png' )
-        myPL.save_hist2D( hist2D, hnm, [0, self.bin_max2D, 0, self.bin_max2D ], [[0,self.bin_max2D],[0,self.bin_max2D]] )
+        # hnm = Path( self.save_dir, self.name, 'hist2d.png' )
+        # myPL.save_hist2D( hist2D, hnm, [0, self.bin_max2D, 0, self.bin_max2D ], [[0,self.bin_max2D],[0,self.bin_max2D]] )
 
-        hnm = Path( self.save_dir, self.name, 'outp2d.png' )
-        myPL.save_hist2D( outp2D, hnm, [-100, 500, -200, 200 ], [[-100,500],[0,0]] )
+        # hnm = Path( self.save_dir, self.name, 'outp2d.png' )
+        # myPL.save_hist2D( outp2D, hnm, [-100, 500, -200, 200 ], [[-100,500],[0,0]] )
 
-        ## Turn the sampler back on for the validation set
-        self.valid_loader.dataset.weight_on()
-
-    def get_info(self):
-        """ This function is used to return preselected information about the network and
-            the training using the class attributes. It is use primarily for the parallel coordinate plot.
-            It returns a dataframe.
+    def get_dict(self):
         """
-        columns = [ 'do_rot',
-                    'weight_to',
-                    'weight_ratio',
-                    'weight_shift',
-                    'v_frac',
-                    'batch_size',
-                    'n_train_files',
-                    'n_valid_files',
-                    'train_size',
-                    'valid_size',
-                    'act',
-                    'depth',
-                    'width',
-                    'skips',
-                    'nrm',
-                    'drpt',
-                    'loss_fn',
-                    'lr',
-                    'skn_weight',
-                    'epochs_trained',
-                    'best_epoch',
-                    'cut_calo',
-                    'cut_track', ]
-        data = [[ self.__dict__[c] for c in columns ]]
-        return pd.DataFrame(data=data, index=[self.name], columns=columns)
+        Creates a dictionary using all strings, intergers and floats from the state dict.
+        This should be sufficient for recording all hyperparameters for the network.
+        """
+        return { k:str(v) for k, v in self.__dict__.items() if isinstance(v, (str, int, float)) }
 
     def update_dict(self, vars):
         """

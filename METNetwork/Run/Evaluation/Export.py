@@ -124,5 +124,21 @@ def main():
     print( onnx.helper.printable_graph(model.graph) )
     onnx.checker.check_model(model)
 
+    # metadata for model
+    # name and name in metadata
+    # author name and CERN ID name
+    # date of training
+    # where trained and card
+    # info.txt (maybe not all)
+    # analysis release did we get the inputs
+    # training files
+    # torch and onnx release versions
+
+
+
+
+
+
+
 if __name__ == '__main__':
     main()

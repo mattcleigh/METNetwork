@@ -46,16 +46,14 @@ def get_loss(name, **kwargs):
         'hbloss': nn.HuberLoss(reduction='none', **kwargs),
         'celoss': nn.CrossEntropyLoss(reduction='none', **kwargs),
         'bcewll': nn.BCEWithLogitsLoss(reduction='none', **kwargs),
-        'snkhrn': gl.SamplesLoss('sinkhorn')
+        'snkhrn': gl.SamplesLoss('sinkhorn', p=1, blur=0.01),
+        'emdist': gl.SamplesLoss('energy', p=2),
     }[name]
 
 def get_opt(name, params, lr, **kwargs):
     if   name == 'adam': return optim.Adam(params, lr=lr, **kwargs)
     elif name == 'rmsp': return optim.RMSprop(params, lr=lr, **kwargs)
     elif name == 'sgd':  return optim.SGD(params, lr=lr, **kwargs)
-
-def update_avg(old, new, i):
-    return old + (new - old) / i
 
 def get_grad_norm(model):
     total_norm = 0
@@ -95,3 +93,13 @@ def move_dev(values, dev):
         return [ v.to(dev) for v in values ]
     else:
         return values.to(dev)
+
+def update_avg(old, new, i):
+    return old + (new - old) / i
+
+def update_avg_dict(old_dict, new_tup, i):
+    """
+    Given a dictionary of averages, update the entries using a tuple of new values
+    """
+    for k, n in zip(old_dict, new_tup):
+        old_dict[k] = update_avg(old_dict[k], n, i)

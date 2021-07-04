@@ -1,9 +1,10 @@
 import numpy as np
+import seaborn as sns
 from scipy.interpolate import make_interp_spline
 
 import matplotlib
-from matplotlib import ticker
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 
 class io_plot:
     """
@@ -31,7 +32,7 @@ class loss_plot(io_plot):
         self.trn_line, = self.ax.plot([], '-r', label='Train')
         self.vld_line, = self.ax.plot([], '-g', label='Valid')
 
-    def _update(self, trn_data, vld_data):
+    def _update(self, trn_data, vld_data, xdata=None):
         self.trn_line.set_data(1+np.arange(len(trn_data)), trn_data)
         self.vld_line.set_data(1+np.arange(len(vld_data)), vld_data)
         self.ax.legend()
@@ -49,6 +50,11 @@ def save_hist2D( hist, name, box, ln_coords = [] ):
     ax.set_ylabel( 'Network MET [GeV]' )
     plt.tight_layout()
     fig.savefig( name )
+
+def contour_with_project(xvalues, yvalues, zvalues):
+    fig = plt.figure( figsize=(5,5) )
+    plt.contour(h_tru_xy.T)
+    plt.show()
 
 def parallel_plot(df,cols,rank_attr,cmap='Spectral',spread=None,curved=False,curvedextend=0.1):
     """

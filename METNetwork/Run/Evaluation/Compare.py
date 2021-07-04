@@ -9,24 +9,6 @@ from METNetwork.Resources import Plotting as myPL
 spec = "viridis"
 cmap = plt.get_cmap(spec)
 
-def learning_plot( file_list ):
-
-    ## Create figure
-    fig = plt.figure( figsize = (10,5) )
-    ax  = fig.add_subplot(111)
-
-    ## Iterate through the files in the list
-    for i, f in enumerate(file_list):
-        previous_data = np.loadtxt( f+"train_hist.csv" )
-        c = cmap( (i+0.5) / len(file_list) )
-
-        ## Plot the training and validation losses
-        plt.plot( previous_data[:,0].tolist(), "-" , color = c )
-        plt.plot( previous_data[:,1].tolist(), "--", color = c )
-
-    # plt.legend()
-    plt.show()
-
 def hist_plot( df ):
 
     ## Calculate the bins to use for the histogram
@@ -40,11 +22,11 @@ def hist_plot( df ):
 
         ## Pull out only the histogram array from the dataframe row
         hist = row.values[ df.columns.str.contains("hist") ]
-        print(name)
+        # print(name)
 
         ## The label for the graph is based on the index or the variables
-        if index not in [ "Tight", "Truth" ]:
-            name = "cut Calo: {}, cut Track".format( row.cut_calo, row.cut_track )
+        # if index not in [ "Tight", "Truth" ]:
+            # name = "cut Calo: {}, cut Track".format( row.cut_calo, row.cut_track )
 
         ## Normalise the histogram
         hist /= np.sum(hist) #* true_h
@@ -68,7 +50,8 @@ def hist_plot( df ):
 def metric_plot( df, metrics, cols ):
 
     ## The x-axis bin centers for the plots
-    x_vals = np.linspace(2, 398, 50)
+    x_vals = np.linspace(0, 400, 40+1)
+    x_vals = (x_vals[1:]+x_vals[:-1])/2
 
     ## Cycle through the requested metrics
     for met in metrics:
@@ -88,11 +71,11 @@ def metric_plot( df, metrics, cols ):
             vals = row.values[ df.columns.str.contains(met) ][1:]
 
             # The label for the graph is based on the index or the variables
-            if index not in [ "Tight", "Truth" ]:
-                name = "cut_calo: {}, cut_track: {}".format( row.cut_calo, row.cut_track )
+            # if index not in [ "Tight", "Truth" ]:
+                # name = "cut_calo: {}, cut_track: {}".format( row.cut_calo, row.cut_track )
 
             ## Get the colour and make the plot
-            c = cmap( (i+1) / (len(df)-2) )
+            c = cmap( (i+1) / (len(df)) )
             if index == "Truth": c = "k"
             if index == "Tight": c = "b"
             ax.plot( x_vals, vals, "-o", color=c, label=name )
@@ -114,7 +97,7 @@ def metric_plot( df, metrics, cols ):
 
 def main():
 
-    input_search = '/home/matthew/Documents/PhD/Saved_Networks/CutStudy/*/'
+    input_search = '/home/matthew/Documents/PhD/Saved_Networks/tmp/*/'
     order = "Res-1"
     N = 0
     restrict = [
@@ -123,10 +106,10 @@ def main():
                 # ( "nrm",    True ),
                 # ( "lr",     1e-4 ),
                 # ( "do_rot", True ),
-                ( "weight_to", -300 ),
-                ( "weight_ratio", 0.1 ),
+                # ( "weight_to", -300 ),
+                # ( "weight_ratio", 0.1 ),
                 # ( "weight_shift", 0 ),
-                ( "skn_weight", 0.1 ),
+                # ( "skn_weight", 0.1 ),
                 # ( "cut_track", False ),
                 # ( "cut_calo", False ),
                 ]
@@ -137,7 +120,7 @@ def main():
 
     ## Combine all dataframes, add bias column, invert weight (less twisty)
     df = pd.concat( [ pd.read_csv(f+"perf.csv", index_col=0) for f in file_list ] ).fillna(0)
-    df["bias"] = np.square(df.loc[:, df.columns.str.contains("DLin")].drop(("DLin"+str(i) for i in range(-1,6)), axis=1)).mean(axis=1)
+    # df["bias"] = np.square(df.loc[:, df.columns.str.contains("DLin")].drop(("DLin"+str(i) for i in range(-1,6)), axis=1)).mean(axis=1)
     df["weight_to"] *= -1
 
     for flag, value in restrict: df = df[ df[flag] == value ]     ## Only show dataframes matching restrictions
@@ -150,12 +133,12 @@ def main():
     # myPL.parallel_plot( df, cols, "Res-1", curved=True, cmap=spec )
 
     ## Add in tight
-    if include:
-        df = pd.concat( [ df, pd.read_csv("../../Output/Tight_perf.csv", index_col=0) ] ).fillna(0)
+    # if include:
+        # df = pd.concat( [ df, pd.read_csv("../../Output/Tight_perf.csv", index_col=0) ] ).fillna(0)
 
     ## Create the metric plots
-    metrics = [ "DLin", "Res", "Ang" ]
-    metric_plot( df, metrics, cols )
+    metrics = [ "Res", "Lin", "Ang" ]
+    metric_plot(df, metrics, cols)
 
     ## Make the learning plots
     # learning_plot( file_list )
