@@ -2,6 +2,7 @@ import argparse
 import torch.nn as nn
 
 from METNetwork.Resources import Model
+from METNetwork.Resources.Utils import full_inpts
 
 def str2bool(v):
     if isinstance(v, bool): return v
@@ -41,6 +42,21 @@ def get_args():
     parser.add_argument( "--chnk_size",
                          type = int,
                          help = "The size of the chunks taken from each of the ofiles to fill the buffer",
+                         required = True )
+
+    parser.add_argument( "--b_size",
+                         type = int,
+                         help = "The batch size",
+                         required = True )
+
+    parser.add_argument( "--n_workers",
+                         type = int,
+                         help = "The number of worker threads to prepare the batches",
+                         required = True )
+
+    parser.add_argument( "--weight_type",
+                         type = str,
+                         help = "Derive weights based on the 2D target histogram 'trg' or the 1D magnitude histogram 'mag'",
                          required = True )
 
     parser.add_argument( "--weight_to",
@@ -113,16 +129,6 @@ def get_args():
                          help = "Maximum value of the batch gradient norm",
                          required = True )
 
-    parser.add_argument( "--b_size",
-                         type = int,
-                         help = "The batch size",
-                         required = True )
-
-    parser.add_argument( "--n_workers",
-                         type = int,
-                         help = "The number of worker threads to prepare the batches",
-                         required = True )
-
     return parser.parse_args()
 
 def print_args(args):
@@ -154,41 +160,42 @@ def main():
 
     ## The input list
     inpt_list = [
-        'Tight_Final_ET', 'Tight_Final_SumET', 'Tight_Sig',
-        'Loose_Final_ET', 'Loose_Final_EX', 'Loose_Final_EY', 'Loose_Final_SumET', 'Loose_Sig',
-        'Tghtr_Final_ET', 'Tghtr_Final_EX', 'Tghtr_Final_EY', 'Tghtr_Final_SumET', 'Tghtr_Sig',
-        'FJVT_Final_ET',  'FJVT_Final_EX',  'FJVT_Final_EY',  'FJVT_Final_SumET',  'FJVT_Sig',
-        'Calo_Final_ET',  'Calo_Final_EX',  'Calo_Final_EY',  'Calo_Final_SumET',  'Calo_Sig',
-        'Track_Final_ET', 'Track_Final_EX', 'Track_Final_EY', 'Track_Final_SumET',
-        \
-        'Tight_RefJet_ET', 'Tight_RefJet_EX', 'Tight_RefJet_EY', 'Tight_RefJet_SumET',
-        'Loose_RefJet_ET', 'Loose_RefJet_EX', 'Loose_RefJet_EY', 'Loose_RefJet_SumET',
-        'Tghtr_RefJet_ET', 'Tghtr_RefJet_EX', 'Tghtr_RefJet_EY', 'Tghtr_RefJet_SumET',
-        'FJVT_RefJet_ET', 'FJVT_RefJet_EX', 'FJVT_RefJet_EY', 'FJVT_RefJet_SumET',
-        \
-        'Tight_Muons_ET', 'Tight_Muons_EX', 'Tight_Muons_EY', 'Tight_Muons_SumET',
-        'Tight_RefEle_ET', 'Tight_RefEle_EX', 'Tight_RefEle_EY', 'Tight_RefEle_SumET',
-        'Tight_RefGamma_ET', 'Tight_RefGamma_EX', 'Tight_RefGamma_EY', 'Tight_RefGamma_SumET',
-        \
-        'Loose_PVSoftTrk_ET', 'Loose_PVSoftTrk_EX', 'Loose_PVSoftTrk_EY', 'Loose_PVSoftTrk_SumET',
-        'Calo_SoftClus_ET', 'Calo_SoftClus_EX', 'Calo_SoftClus_EY', 'Calo_SoftClus_SumET',
-        \
+        'Tight_Sig',
+        'Loose_Sig',
+        'Tghtr_Sig',
+        'FJVT_Sig',
+        'Calo_Sig',
+        'Tight_RefJet_EX', 'Tight_RefJet_EY', 'Tight_RefJet_SumET',
+        'Loose_RefJet_EX', 'Loose_RefJet_EY', 'Loose_RefJet_SumET',
+        'Tghtr_RefJet_EX', 'Tghtr_RefJet_EY', 'Tghtr_RefJet_SumET',
+        'FJVT_RefJet_EX', 'FJVT_RefJet_EY', 'FJVT_RefJet_SumET',
+        'Tight_Muons_EX', 'Tight_Muons_EY', 'Tight_Muons_SumET',
+        'Tight_RefEle_EX', 'Tight_RefEle_EY', 'Tight_RefEle_SumET',
+        'Tight_RefGamma_EX', 'Tight_RefGamma_EY', 'Tight_RefGamma_SumET',
+        'Loose_PVSoftTrk_EX', 'Loose_PVSoftTrk_EY', 'Loose_PVSoftTrk_SumET',
+        'Calo_SoftClus_EX', 'Calo_SoftClus_EY', 'Calo_SoftClus_SumET',
         'ActMu', 'NVx_2Tracks', 'NVx_4Tracks', 'PV_NTracks',
         'N_Muons', 'N_Ele', 'N_Gamma', 'N_Jets', 'N_FWD_Jets',
         'SumET_FWD_Jets', 'Sum_JetPU'
     ]
 
+    # inpt_list = full_inpts()
+
     ## Initialise the model
     model = Model.METNET_Agent(args.name, args.save_dir)
 
-    ## Load up the dataset
-    model.setup_dataset(inpt_list, args.data_dir, args.v_frac, args.n_ofiles, args.chnk_size, args.weight_to, args.weight_ratio, args.weight_shift)
-
     ## Initialise the network
-    model.setup_network(args.act, args.depth, args.width, args.nrm, args.drpt)
+    model.setup_network(inpt_list, args.act, args.depth, args.width, args.nrm, args.drpt)
+
+    ## Load up the dataset
+    model.setup_dataset(args.data_dir, args.v_frac,
+                        args.n_ofiles, args.chnk_size,
+                        args.b_size, args.n_workers,
+                        args.weight_type, args.weight_to,
+                        args.weight_ratio, args.weight_shift)
 
     ## Setup up the parameters for training
-    model.setup_training(args.opt_nm, args.lr, args.reg_loss_nm, args.dst_loss_nm, args.dst_weight, args.grad_clip, args.b_size, args.n_workers)
+    model.setup_training(args.opt_nm, args.lr, args.reg_loss_nm, args.dst_loss_nm, args.dst_weight, args.grad_clip)
 
     ## Run the training loop
     model.run_training_loop()

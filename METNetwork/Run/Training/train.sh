@@ -1,23 +1,24 @@
 python Train.py \
-  --name      onlyY \
+  --name      Test \
   --save_dir  /home/matthew/Documents/PhD/Saved_Networks/tmp/ \
   --data_dir  /home/matthew/Documents/PhD/Data/METData/Rotated/ \
   --v_frac    0.5 \
   --n_ofiles  32 \
   --chnk_size 1024 \
+  --b_size    1024 \
+  --n_workers 4 \
+  --weight_type mag \
   --weight_to  0 \
   --weight_ratio 0.0 \
   --weight_shift 0.0 \
   --act       lrlu \
-  --depth     2 \
-  --width     256 \
-  --nrm       True \
-  --drpt      0 \
+  --depth     1 \
+  --width     32 \
+  --nrm       False \
+  --drpt      0.0 \
   --opt_nm    adam \
   --lr        1e-4 \
   --reg_loss_nm hbloss \
-  --dst_loss_nm emdist \
-  --dst_weight 1 \
+  --dst_loss_nm enrgyd \
+  --dst_weight 0 \
   --grad_clip 0 \
-  --b_size    1024 \
-  --n_workers 2 \

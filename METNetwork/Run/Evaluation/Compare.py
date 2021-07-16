@@ -1,57 +1,20 @@
 import glob
-import pandas as pd
 import numpy as np
+import pandas as pd
+
+from pathlib import Path
 from pandas.plotting import parallel_coordinates
 import matplotlib.pyplot as plt
 
 from METNetwork.Resources import Plotting as myPL
 
-spec = "viridis"
+spec = 'viridis'
 cmap = plt.get_cmap(spec)
 
-def hist_plot( df ):
+def metric_plot(net_list):
 
-    ## Calculate the bins to use for the histogram
-    bins = np.histogram( [], bins=50, range=[0,400] )[1][1:]
-    true_h = df.loc['Truth'].values[ df.columns.str.contains("hist") ]
-    true_h /= np.sum(true_h)
-
-    ## Cycle through the samples in the dataframe
-    for i, (index, row) in enumerate(df.iterrows()):
-        name = index
-
-        ## Pull out only the histogram array from the dataframe row
-        hist = row.values[ df.columns.str.contains("hist") ]
-        # print(name)
-
-        ## The label for the graph is based on the index or the variables
-        # if index not in [ "Tight", "Truth" ]:
-            # name = "cut Calo: {}, cut Track".format( row.cut_calo, row.cut_track )
-
-        ## Normalise the histogram
-        hist /= np.sum(hist) #* true_h
-
-        ## Get the colour (truth in black) and plot the step function
-        c = cmap( (i+1) / (len(df)-2) )
-        if index == "Truth": c = "k"
-        if index == "Tight": c = "b"
-        plt.plot( bins, hist, "-", color=c, label=name )
-
-    ## Setup the the labels and limits of the plot
-    plt.ylabel( "Normalised Histogram" )
-    plt.xlabel( "MET Magnitude [GeV]" )
-    plt.xlim(left=0)
-    plt.ylim(bottom=0)
-    # plt.yscale('log')
-    plt.tight_layout()
-    plt.legend()
-    plt.show()
-
-def metric_plot( df, metrics, cols ):
-
-    ## The x-axis bin centers for the plots
-    x_vals = np.linspace(0, 400, 40+1)
-    x_vals = (x_vals[1:]+x_vals[:-1])/2
+    ## Get the list of saved metrics from the first file
+    metrics = np.loadtxt(net_list[0]+'/perf.csv', delimiter=',', dtype=str, max_rows=1)[1:]
 
     ## Cycle through the requested metrics
     for met in metrics:
@@ -59,96 +22,75 @@ def metric_plot( df, metrics, cols ):
         ## Create figure
         fig = plt.figure( figsize = (10,5) )
         ax = fig.add_subplot(111)
-        fig.suptitle(met)
 
-        ## Cycle through the dataframe
-        for i, (index, row) in enumerate(df.iterrows()):
-            name = index
-            if index == "Truth":
-                continue
+        ## Cycle through the networks
+        for net in net_list:
 
-            ## Pull out the metric array from the row (first is group average)
-            vals = row.values[ df.columns.str.contains(met) ][1:]
+            name = Path(net).name
 
-            # The label for the graph is based on the index or the variables
-            # if index not in [ "Tight", "Truth" ]:
-                # name = "cut_calo: {}, cut_track: {}".format( row.cut_calo, row.cut_track )
-
-            ## Get the colour and make the plot
-            c = cmap( (i+1) / (len(df)) )
-            if index == "Truth": c = "k"
-            if index == "Tight": c = "b"
-            ax.plot( x_vals, vals, "-o", color=c, label=name )
+            ## Load the and plot the performance column
+            df = pd.read_csv(net+'/perf.csv', usecols=['TruM', met])
+            ax.plot( df['TruM'], df[met], '-o', label=name )
 
         ## Work out the limits and labels for the plots
-        ax.axhline(0, color="k")
-        ax.axvline(0, color="k")
+        ax.axhline(0, color='k')
+        ax.axvline(0, color='k')
         ax.set_xlim(left=0)
-        if met!="DLin":
-            ax.set_ylim(bottom=0)
-        else:
+        ax.set_ylim(bottom=0)
+
+        if met=='Lin':
             ax.set_ylim(top=0.5)
             ax.set_ylim(bottom=-0.2)
+
         ax.set_ylabel(met)
-        ax.set_xlabel("True MET [GeV]")
+        ax.set_xlabel('True MET [GeV]')
         ax.legend()
         ax.grid()
+
     plt.show()
+
+def cutNetList(folder, restr, order, top_n):
+
+    net_list = glob.glob(folder+'*')
+
+    df = pd.concat([ pd.read_csv(f+'/dict.csv') for f in net_list ])         ## Combine the performance dataframes from each
+    for flag, value in restr: df = df[ df[flag] == value ]        ## Only show dataframes matching restrictions
+    if order: df = df.sort_values( order, ascending=True )  ## Order the dataframes w.r.t. some variable
+    if top_n: df = df[:top_n]
+
+    return [ folder + n for n in df.name.tolist() ]
 
 def main():
 
-    input_search = '/home/matthew/Documents/PhD/Saved_Networks/tmp/*/'
-    order = "Res-1"
-    N = 0
+    folder = '/home/matthew/Documents/PhD/Saved_Networks/tmp/'
+    order = 'avg_res'
+    top_n = 0
     restrict = [
-                # ( "batch_size",  2048 ),
-                # ( "width",  1024 ),
-                # ( "nrm",    True ),
-                # ( "lr",     1e-4 ),
-                # ( "do_rot", True ),
-                # ( "weight_to", -300 ),
-                # ( "weight_ratio", 0.1 ),
-                # ( "weight_shift", 0 ),
-                # ( "skn_weight", 0.1 ),
-                # ( "cut_track", False ),
-                # ( "cut_calo", False ),
+                # ( 'batch_size',  2048 ),
+                # ( 'width',  1024 ),
+                # ( 'nrm',    True ),
+                # ( 'lr',     1e-4 ),
+                # ( 'do_rot', True ),
+                # ( 'weight_to', -300 ),
+                # ( 'weight_ratio', 0.1 ),
+                # ( 'weight_shift', 0 ),
+                # ( 'skn_weight', 0.1 ),
+                # ( 'cut_track', False ),
+                # ( 'cut_calo', False ),
                 ]
-    include = True
 
-    ## Find all the networks
-    file_list = glob.glob(input_search)
-
-    ## Combine all dataframes, add bias column, invert weight (less twisty)
-    df = pd.concat( [ pd.read_csv(f+"perf.csv", index_col=0) for f in file_list ] ).fillna(0)
-    # df["bias"] = np.square(df.loc[:, df.columns.str.contains("DLin")].drop(("DLin"+str(i) for i in range(-1,6)), axis=1)).mean(axis=1)
-    df["weight_to"] *= -1
-
-    for flag, value in restrict: df = df[ df[flag] == value ]     ## Only show dataframes matching restrictions
-    if order != "": df = df.sort_values( order, ascending=True )  ## Order the dataframes w.r.t. some variable
-    if N != 0: df = df[:N]                                        ## Select only the first N variables
-
-
-    ## Create the parallel coordinate plot
-    cols    = [ "weight_to", "weight_shift", "weight_ratio", "skn_weight" ]
-    # myPL.parallel_plot( df, cols, "Res-1", curved=True, cmap=spec )
-
-    ## Add in tight
-    # if include:
-        # df = pd.concat( [ df, pd.read_csv("../../Output/Tight_perf.csv", index_col=0) ] ).fillna(0)
+    ## Find all the networks and cut the list down based on restrictions
+    net_list = cutNetList(folder, restrict, order, top_n)
 
     ## Create the metric plots
-    metrics = [ "Res", "Lin", "Ang" ]
-    metric_plot(df, metrics, cols)
-
-    ## Make the learning plots
-    # learning_plot( file_list )
+    metric_plot(net_list)
 
     ## Do the histogram plot
-    hist_plot( df )
+    # hist_plot( df )
 
 
 
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

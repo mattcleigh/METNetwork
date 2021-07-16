@@ -13,6 +13,8 @@ import dask.dataframe as dd
 from dask.diagnostics import ProgressBar
 ProgressBar().register()
 
+from METNetwork.Resources import Plotting as myPL
+
 def str2bool(v):
     if isinstance(v, bool): return v
     if   v.lower() in ('yes', 'true', 't', 'y', '1'): return True
@@ -51,22 +53,15 @@ def main():
     output_path.mkdir(parents=True)
 
     ## Read all csv files in the input folder into a dask dataframe (set blocksize to 48Mb)
-    df = dd.read_csv(args.input_dir + '/*/*100.train-sample.csv', assume_missing=True, blocksize=48e6) ## Missing means that 0 is a float
+    df = dd.read_csv(args.input_dir + '/*/*.train-sample.csv', assume_missing=True, blocksize=48e6) ## Missing means that 0 is a float
     col_names = list(df.columns)
-
-    #### We histogram the dataset based on its True ET miss distribution ####
 
     ## Create a histogram based on Truth magnitude
     bins = np.linspace(0, 400e3, 80 + 1)
-    hist, bins = da.histogram(df['True_ET'], bins, density=True)
+    hist, _ = da.histogram(df['True_ET'], bins, density=True)
     hist = hist.compute()
-    mid_bins = (bins[:-1] + bins[1:]) / 2
-
-    ## Save the histogram as an image and as a csv
-    fig, ax = plt.subplots(1, 1, figsize = (8,5) )
-    ax.plot(mid_bins, hist)
-    fig.savefig(Path(output_path, 'hist.png'))
-    np.savetxt(Path(output_path, 'hist.csv'), np.vstack((mid_bins, hist)).T, delimiter=',')
+    myPL.plot_and_save_hists( Path(output_path, 'MagDist'), [hist], ['Truth'],
+                              ['MET Magnitude [Gev]', 'Normalised'], bins, do_csv=True )
 
     if args.do_rot:
 
@@ -92,15 +87,15 @@ def main():
             df[col] = rotated_y[:, i]
 
         ## If we are performing rotations then we dont want Tight EX and EY (drop from df and column names)
-        df = df.drop('Tight_Final_EX', axis=1)
-        df = df.drop('Tight_Final_EY', axis=1)
-        col_names.remove('Tight_Final_EX')
-        col_names.remove('Tight_Final_EY')
+        # df = df.drop('Tight_Final_EX', axis=1)
+        # df = df.drop('Tight_Final_EY', axis=1) ## Leave these in for now as they help create the mask for which
+        # col_names.remove('Tight_Final_EX')     ## Variables produced by the METNet tool are actually used by the network!!!
+        # col_names.remove('Tight_Final_EY')
 
     ## We drop the angle and DSID, not used in training!
-    df = df.drop('Tight_Phi', axis=1)
-    df = df.drop('DSID', axis=1)
-    col_names.remove('Tight_Phi')
+    # df = df.drop('Tight_Phi', axis=1)
+    # col_names.remove('Tight_Phi')
+    df = df.drop('DSID', axis=1) ## Remove DSID as this is not produced by the METNet tool!
     col_names.remove('DSID')
 
     ## Calculate the mean and deviation on the dataset and convert to an array
@@ -111,13 +106,8 @@ def main():
     ## Normalise the dataframe
     normed = (df - mean) / (sdev+1e-6)
 
-    ## Add the unnormed True MET back in
-    normed['Raw_True_ET'] = df['True_ET']
-    normed['Raw_True_EX'] = df['True_EX']
-    normed['Raw_True_EY'] = df['True_EY']
-    col_names.append('Raw_True_ET')
-    col_names.append('Raw_True_EX')
-    col_names.append('Raw_True_EY')
+    ## Add the unnormed True MET back in (used for weighting)
+    normed['True_ET'] = df['True_ET']
 
     ## The column orders change when we normalise (dont know why), we fix this and cast to float
     normed = normed[col_names].astype('float32')
@@ -128,6 +118,15 @@ def main():
     ## Package and save the stats together
     stat_df = pd.concat([mean, sdev], axis=1).transpose()
     stat_df.to_csv(Path(output_path, 'stats.csv'), index=False)
+
+    ## Create a histogram using just the normed targets
+    trg_bins = [ np.linspace(-3, 5, 40+1), np.linspace(-4, 4, 40+1) ]
+    trg_hist = da.histogramdd(normed[['True_EX', 'True_EY']].to_dask_array(), trg_bins, density=True)[0]
+    trg_hist = trg_hist.compute()
+
+    ## Save the histogram as an image and as a csv
+    myPL.plot_and_save_contours( Path(output_path, 'TrgDist'), [trg_hist], ['Truth'],
+                                 ['scaled-x', 'scaled-y'], trg_bins, do_csv=True )
 
 if __name__ == '__main__':
     main()

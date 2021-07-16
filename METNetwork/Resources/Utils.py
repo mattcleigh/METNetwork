@@ -47,7 +47,7 @@ def get_loss(name, **kwargs):
         'celoss': nn.CrossEntropyLoss(reduction='none', **kwargs),
         'bcewll': nn.BCEWithLogitsLoss(reduction='none', **kwargs),
         'snkhrn': gl.SamplesLoss('sinkhorn', p=1, blur=0.01),
-        'emdist': gl.SamplesLoss('energy', p=2),
+        'enrgyd': gl.SamplesLoss('energy'),
     }[name]
 
 def get_opt(name, params, lr, **kwargs):
@@ -103,3 +103,30 @@ def update_avg_dict(old_dict, new_tup, i):
     """
     for k, n in zip(old_dict, new_tup):
         old_dict[k] = update_avg(old_dict[k], n, i)
+
+def feature_list():
+    return [ 'Tight_Final_ET', 'Tight_Final_EX', 'Tight_Final_EY', 'Tight_Final_SumET', 'Tight_Sig',
+             'Loose_Final_ET', 'Loose_Final_EX', 'Loose_Final_EY', 'Loose_Final_SumET', 'Loose_Sig',
+             'Tghtr_Final_ET', 'Tghtr_Final_EX', 'Tghtr_Final_EY', 'Tghtr_Final_SumET', 'Tghtr_Sig',
+             'FJVT_Final_ET',  'FJVT_Final_EX',  'FJVT_Final_EY',  'FJVT_Final_SumET',  'FJVT_Sig',
+             'Calo_Final_ET',  'Calo_Final_EX',  'Calo_Final_EY',  'Calo_Final_SumET',  'Calo_Sig',
+             'Track_Final_ET', 'Track_Final_EX', 'Track_Final_EY', 'Track_Final_SumET',
+             'Tight_RefJet_ET', 'Tight_RefJet_EX', 'Tight_RefJet_EY', 'Tight_RefJet_SumET',
+             'Loose_RefJet_ET', 'Loose_RefJet_EX', 'Loose_RefJet_EY', 'Loose_RefJet_SumET',
+             'Tghtr_RefJet_ET', 'Tghtr_RefJet_EX', 'Tghtr_RefJet_EY', 'Tghtr_RefJet_SumET',
+             'FJVT_RefJet_ET', 'FJVT_RefJet_EX', 'FJVT_RefJet_EY', 'FJVT_RefJet_SumET',
+             'Tight_Muons_ET', 'Tight_Muons_EX', 'Tight_Muons_EY', 'Tight_Muons_SumET',
+             'Tight_RefEle_ET', 'Tight_RefEle_EX', 'Tight_RefEle_EY', 'Tight_RefEle_SumET',
+             'Tight_RefGamma_ET', 'Tight_RefGamma_EX', 'Tight_RefGamma_EY', 'Tight_RefGamma_SumET',
+             'Loose_PVSoftTrk_ET', 'Loose_PVSoftTrk_EX', 'Loose_PVSoftTrk_EY', 'Loose_PVSoftTrk_SumET',
+             'Calo_SoftClus_ET', 'Calo_SoftClus_EX', 'Calo_SoftClus_EY', 'Calo_SoftClus_SumET',
+             'ActMu', 'NVx_2Tracks', 'NVx_4Tracks', 'PV_NTracks',
+             'N_Muons', 'N_Ele', 'N_Gamma', 'N_Jets', 'N_FWD_Jets',
+             'SumET_FWD_Jets', 'Sum_JetPU', 'Tight_Phi' ]
+
+def full_inpts():
+    inpt_list = feature_list()
+    inpt_list.remove('Tight_Final_EX',)
+    inpt_list.remove('Tight_Final_EY')
+    inpt_list.remove('Tight_Phi')
+    return inpt_list

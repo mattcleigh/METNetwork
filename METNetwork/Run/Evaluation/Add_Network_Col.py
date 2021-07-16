@@ -9,20 +9,16 @@ from pathlib import Path
 import torch as T
 import torch.nn as nn
 
-import METNetwork.Resources.Model as myMD
+from METNetwork.Resources import Model
 import METNetwork.Resources.Utils as myUT
-from Export import Enveloped_Model
 
 def main():
 
     with T.no_grad():
 
-        data_folder = '/mnt/scratch/Data/METData/Raw/user.mleigh.02*/'
+        data_folder = '/home/matthew/Documents/PhD/Data/METData/Test/*ZZ*/'
 
-        network_names = [ ('Normal', 'METNet_CutStudy_20_06_21_47688528_9', False, False),
-                          ('NoCalo', 'METNet_CutStudy_20_06_21_47688250_6', True, False),
-                          ('NoTrack', 'METNet_CutStudy_20_06_21_47688245_3', False, True),
-                          ('Neither', 'METNet_CutStudy_20_06_21_47688241_0', True, True) ]
+        network_names = [ ('Test', '/home/matthew/Documents/PhD/Saved_Networks/tmp/IndepDrp/') ]
 
         ## Load the list of files
         all_files = glob.glob( data_folder + '*sample.csv' )
@@ -31,27 +27,16 @@ def main():
             exit()
 
         ## Cycle through the requested networks
-        for network_name, network_file, cc, ct in network_names:
+        for network_name, network_file in network_names:
 
             ## Load the network
-            model = myMD.METNET_Agent( name = 'METNet_CutStudy_20_06_21_47688528_9',
-                                       save_dir = '/mnt/scratch/Saved_Networks/CutStudy/')
-            model.setup_network( cc, ct,
-                                 act = nn.SiLU(),
-                                 depth = 5, width = 1024, skips = 0,
-                                 nrm = True, drpt = 0.0, dev = 'cuda' )
-            model.load('best', get_opt = False)
-            model.network.eval()
+            model = Model.METNET_Agent('IndepDrp', '/home/matthew/Documents/PhD/Saved_Networks/tmp/')
+            model.load('best')
 
-            ## Load the stat file for pre-post processing
-            stats = np.loadtxt( model.save_dir+model.name+'/stat.csv',
-                                skiprows=1,
-                                delimiter=',',
-                                dtype=np.float32 )
-            stats = T.from_numpy(stats).to('cuda')
-
-            ## Envelop the model with its pre and post processing steps
-            env_model = Enveloped_Model(model.network, stats)
+            ## Configure the network for full pass evaluation
+            model.net.to('cuda')
+            model.net.eval()
+            model.net.do_proc = True
 
             ## Load the input files
             b_size = 4096
@@ -67,9 +52,9 @@ def main():
                 ## Cycle through the batches
                 for batch in tqdm(pd.read_csv(file, chunksize=b_size, dtype=np.float32)):
 
-                    ## Get the network output for the batch
+                    ## Get the network output for the batch (the final values in the csv are the True_ET, EX, EY and DSID)
                     net_inp = T.from_numpy(batch.to_numpy()[:, :-4]).to('cuda')
-                    net_out = env_model( net_inp )
+                    net_out = model.net(net_inp)
 
                     ## Fill in the buffers
                     net_et.append( T.linalg.norm(net_out, axis=1).cpu() )

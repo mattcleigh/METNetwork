@@ -12,6 +12,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 import METNetwork.Resources.Utils as myUT
+import METNetwork.Resources.Modules as myML
 import METNetwork.Resources.Plotting as myPL
 import METNetwork.Resources.Datasets as myDS
 
@@ -20,34 +21,7 @@ class METNET_Agent:
         self.name = name
         self.save_dir = save_dir
 
-    def setup_dataset(self, inpt_list, data_dir, v_frac, n_ofiles, chnk_size, weight_to, weight_ratio, weight_shift):
-        """
-        Initialise the train and validation datasets to be used
-        """
-        print()
-        print('Seting up the datasets')
-
-        ## Update our information dictionary
-        self.update_dict(locals())
-
-        ## Build the list of files that will be used in the train and validation set
-        train_files, valid_files = myDS.buildTrainAndValid(data_dir, v_frac)
-
-        ## Get the iterable dataset objects
-        dataset_args = (inpt_list, n_ofiles, chnk_size, weight_to, weight_ratio, weight_shift)
-        self.train_set = myDS.StreamMETDataset(train_files, *dataset_args)
-        self.valid_set = myDS.StreamMETDataset(valid_files, *dataset_args)
-
-        ## Report on the number of files/samples used
-        self.n_train_files = len(train_files)
-        self.n_valid_files = len(valid_files)
-        self.train_size = len(self.train_set)
-        self.valid_size = len(self.valid_set)
-
-        print('train set: {:4} files containing {} samples'.format(self.n_train_files, self.train_size))
-        print('valis set: {:4} files containing {} samples'.format(self.n_valid_files, self.valid_size))
-
-    def setup_network(self, act, depth, width, nrm, drpt):
+    def setup_network(self, inpt_list, act, depth, width, nrm, drpt, dev='auto'):
         """
         This initialises the mlp network with the correct size based on the number of parameters
         specified by the input list created in setup_dataset
@@ -59,19 +33,49 @@ class METNET_Agent:
         self.update_dict(locals())
 
         ## Creating the neural network
-        self.net = myUT.mlp_creator( n_in=len(self.inpt_list), n_out=2,
-                                     depth=depth, width=width, act_h=act, nrm=nrm, drp=drpt)
-
-        ## Save and register the statistics so they can be loaded with the network
-        stats = T.tensor(np.loadtxt(Path(self.data_dir, 'stats.csv'), skiprows=1, delimiter=','), dtype=T.float32)
-        self.net.register_buffer('preproc_stats', stats)
+        self.net = myML.METNetwork( inpt_list, n_out=2, depth=depth, width=width, act_h=act, nrm=nrm, drp=drpt)
 
         ## Select the device and move the network
-        self.device = myUT.sel_device('auto')
+        self.device = myUT.sel_device(dev)
         self.net.to(self.device)
-        print(self.net)
 
-    def setup_training(self, opt_nm, lr, reg_loss_nm, dst_loss_nm, dst_weight, grad_clip, b_size, n_workers):
+    def setup_dataset(self, data_dir, v_frac, n_ofiles, chnk_size, b_size, n_workers, weight_type, weight_to, weight_ratio, weight_shift):
+        """
+        Initialise the train and validation datasets to be used
+        """
+        print()
+        print('Seting up the datasets')
+
+        ## Update our information dictionary
+        self.update_dict(locals())
+
+        ## Read in the dataset statistics and save them to the network's buffers
+        all_stats = T.tensor(pd.read_csv(Path(self.data_dir, 'stats.csv')).to_numpy(), dtype=T.float32, device=self.device)
+        self.net.set_statistics(all_stats)
+
+        ## Build the list of files that will be used in the train and validation set
+        train_files, valid_files = myDS.buildTrainAndValid(data_dir, v_frac)
+
+        ## Get the iterable dataset objects
+        dataset_args = (self.inpt_list + ['True_ET', 'True_EX', 'True_EY'], n_ofiles, chnk_size, weight_type, weight_to, weight_ratio, weight_shift)
+        train_set = myDS.StreamMETDataset(train_files, *dataset_args)
+        valid_set = myDS.StreamMETDataset(valid_files, *dataset_args)
+
+        ## Create the pytorch dataloaders (works for both types of datset)
+        loader_kwargs = {'batch_size':b_size, 'num_workers':n_workers, 'drop_last':True, 'pin_memory':True}
+        self.train_loader = DataLoader(train_set, **loader_kwargs)
+        self.valid_loader = DataLoader(valid_set, **loader_kwargs)
+
+        ## Report on the number of files/samples used
+        self.n_train_files = len(train_files)
+        self.n_valid_files = len(valid_files)
+        self.train_size = len(train_set)
+        self.valid_size = len(valid_set)
+
+        print('train set: {:4} files containing {} samples'.format(self.n_train_files, self.train_size))
+        print('valid set: {:4} files containing {} samples'.format(self.n_valid_files, self.valid_size))
+
+    def setup_training(self, opt_nm, lr, reg_loss_nm, dst_loss_nm, dst_weight, grad_clip):
         """
         Sets up variables used for training, including the optimiser
         """
@@ -88,11 +92,6 @@ class METNET_Agent:
 
         ## Initialise the optimiser
         self.opt = myUT.get_opt(opt_nm, self.net.parameters(), lr)
-
-        ## Create the pytorch dataloaders (works for both types of datset)
-        loader_kwargs = {'batch_size':b_size, 'num_workers':n_workers, 'drop_last':True, 'pin_memory':True}
-        self.train_loader = DataLoader(self.train_set, **loader_kwargs)
-        self.valid_loader = DataLoader(self.valid_set, **loader_kwargs)
 
         ## The history of the losses and their plots
         hist_keys = ['tot_loss', 'reg_loss', 'dst_loss']
@@ -115,8 +114,8 @@ class METNET_Agent:
             print( '\nEpoch: {}'.format(epc) )
 
             ## Run the test/train cycle
-            # self._epoch(is_train=True)
-            # self._epoch(is_train=False)
+            self._epoch(is_train=True)
+            self._epoch(is_train=False)
 
             ## At the end of every epoch we save something, even if it is just logging
             self.save()
@@ -162,17 +161,13 @@ class METNET_Agent:
             if is_train:
                 self.opt.zero_grad()
 
-            ## Move the batch to the network device and break into parts (dont use true_et!)
+            ## Move the batch to the network device and break into parts
             inputs, targets, weights = myUT.move_dev(batch, self.device)
 
             ## Calculate the network output
             outputs = self.net(inputs)
 
             ## Calculate the weighted batch regression loss
-            # y_targ = T.abs(targets.T[1].detach())
-            # y_targ /= y_targ.mean()
-
-            # reg_loss = T.tensor(0, device=self.device)
             reg_loss = (self.reg_loss_fn(outputs, targets).mean(dim=1)*weights).mean()
 
             ## Calculate the distance matching loss (if required)
@@ -189,6 +184,7 @@ class METNET_Agent:
 
             ## Update the running losses
             myUT.update_avg_dict(run_loss, (tot_loss.item(), reg_loss.item(), dst_loss.item()), i+1)
+            break
 
         ## Update the history of the network
         self.update_history(flag, run_loss)
@@ -215,12 +211,15 @@ class METNET_Agent:
         - Every epoch
             - models   -> A folder containing the network and optimiser versions
             - info.txt -> A file containing the network setup and description
-            - loss.csv -> Recorded loss history of the training performance
-            - loss.png -> (Several) plots of the recorded history
-        - When the network validation loss improves (below is handled by the save_perf method)
-            - perf.csv -> Pandas dataframe Performance metrics on the validation set for the best network
-            - MagHist.csv -> 1D histogram of the reconstructed, tight and true magnitude
-            - ExyHist.csv -> 2D histogram of the reconstructed, tight and true x, y outputs
+            - history.csv -> Recorded loss history of the training performance
+            - history.png -> (Several) plots of the recorded history with their names
+        - When the network validation loss improves
+            - Runs the save_perf method. Details below
+            - perf.csv -> Pandas dataframe performance metrics on the validation set for the best network
+            - dict.csv -> Pandas dataframe of the class hyperparameters of the best network (not as readible as info, but can be merged)
+            - MagDist.csv -> 1D histogram of the reconstructed and true magnitude (post-processed)
+            - TrgDist.csv -> 2D histogram of the reconstructed and true x, y outputs
+            - ExyDist.csv -> 2D histogram of the reconstructed and true x, y vectors (post-processed)
         """
 
         ## The full name of the save directory
@@ -232,13 +231,14 @@ class METNET_Agent:
         model_folder.mkdir(parents=True, exist_ok=True)
         T.save(self.net.state_dict(), Path(model_folder, 'net_latest'))
         T.save(self.opt.state_dict(), Path(model_folder, 'opt_latest'))
+
+        ## For our best network we save the entire model, not just the state dict!!!
         if self.bad_epochs==0:
-            T.save(self.net.state_dict(), Path(model_folder, 'net_best'))
+            T.save(self.net, Path(model_folder, 'net_best'))
 
         ## Save a file containing the network setup and description (based on class dict)
         with open(Path(full_name, 'info.txt'), 'w') as f:
-            for k, v in self.__dict__.items():
-                if len(str(v)) > 50: continue ## Save shorter stings
+            for k, v in self.get_dict().items():
                 f.write('{:15} = {}\n'.format(k, str(v)))
             f.write('\n\n'+str(self.net))
             f.write('\n\n'+str(self.opt))
@@ -246,7 +246,7 @@ class METNET_Agent:
 
         ## Save the loss history using pandas
         hist_frame = pd.DataFrame.from_dict(self.history)
-        hist_frame.to_csv(path_or_buf=Path(full_name, 'hist.csv'), index=False)
+        hist_frame.to_csv(path_or_buf=Path(full_name, 'history.csv'), index=False)
 
         ## Update and save the loss plots
         for k in self.hist_plots.keys():
@@ -256,21 +256,30 @@ class METNET_Agent:
         if self.bad_epochs==0:
             self.save_perf()
 
-    def load(self, flag):
+    def load(self, flag, get_opt=False):
 
         ## Get the name of the directories
         full_name = Path(self.save_dir, self.name)
         model_folder = Path(full_name, 'models')
 
-        ## Load the network and optimiser
-        self.net.load_state_dict(T.load(Path(model_folder, 'net_'+flag)))
-        if flag == 'latest':
+        ## Load the network
+        if flag == 'best':
+            self.net = T.load(Path(model_folder, 'net_best'))
+        else:
+            self.net.load_state_dict(T.load(Path(model_folder, 'net_'+flag)))
+
+        ## Load the optimiser
+        if get_opt:
             self.opt.load_state_dict(T.load(Path(model_folder, 'opt_'+flag)))
 
+        ## Load the previously saved dictionary
+        old_dict = pd.read_csv(Path(full_name, 'dict.csv')).to_dict('records')[0]
+        self.update_dict(old_dict)
+
         ## Load the train history
-        self.history = pd.read_csv(Path(full_name, 'hist.csv')).to_dict(orient='list')
-        self.num_epochs = len(self.history['valid_loss'])
-        self.best_epoch = np.argmin(self.history['valid_loss']) + 1
+        self.history = pd.read_csv(Path(full_name, 'history.csv')).to_dict(orient='list')
+        self.num_epochs = len(self.history['valid_tot_loss'])
+        self.best_epoch = np.argmin(self.history['valid_tot_loss']) + 1
         self.bad_epochs = self.num_epochs - self.best_epoch
 
     def save_perf(self):
@@ -285,139 +294,112 @@ class METNET_Agent:
         This performance csv only has two lines: the column names and the values. This is so it can be combined
         with results from other networks!
         We also create several a 1D and 2D histograms
-            - 1D histogram of the reconstructed and true et (post-processed)
-            - 2D histogram of the reconstructed and true x,y (raw)
+            - 1D distributions of the reconstructed and true et (post-processed)
+            - 2D distributions of the reconstructed and true x,y (raw and post-processed)
         """
         print('\nImprovement detected! Saving additional information')
 
         ## The bin setup to use for the profiles
         n_bins = 40
-        m_bins = 400
-        bins = np.linspace(0, m_bins, n_bins+1)
-        bins2d = [ np.linspace(-2, 4, n_bins+1), np.linspace(-3, 3, n_bins+1) ]
+        mag_bins = np.linspace(0, 400, n_bins+1)
+        trg_bins = [ np.linspace(-3, 5, n_bins+1), np.linspace(-4, 4, n_bins+1) ]
+        exy_bins = [ np.linspace(-50, 250, n_bins+1), np.linspace(-150, 150, n_bins+1) ]
 
-        targ_means = self.net.preproc_stats[0,-2:] ## The stats needed to unormalise the target space
-        targ_sdevs = self.net.preproc_stats[1,-2:]
+        ## All the networks outputs and targets combined into a single list!
+        all_outputs = []
+        all_targets = []
 
-        ## The performance metrics to be calculated are stored in a running total matrix
-        met_names = [ 'Res', 'Lin', 'Ang' ]
-        r_idx = [1, 3] ## Which columns are root means as opposed to means (+1)
-        binned_totals = np.zeros((n_bins+1, len(met_names)+1), dtype=np.float64) ## rows = (total+bin1, bin2...) x cols = (n_events + *met_names)
-
-        ## Build a 1D and 2D histogram of the output magnitude
-        h_net_et = np.zeros(n_bins)
-        h_tru_et = np.zeros(n_bins)
-        h_net_xy = np.zeros((n_bins, n_bins))
-        h_tru_xy = np.zeros((n_bins, n_bins))
+        ## The information to be saved in our dataframe, the truth et (for binning) and the performance metric per bin
+        met_names = [ 'Tru', 'Res', 'Lin', 'Ang' ]
 
         ## Configure pytorch, the network and the loader appropriately
         T.set_grad_enabled(False)
         self.net.eval()
         self.valid_loader.dataset.weight_off()
 
-        all_outputs = []
-        all_targets = []
         ## Iterate through the validation set
         for batch in tqdm(self.valid_loader, desc='perfm', ncols=80, ascii=True):
 
-            ## Get the network outputs
+            ## Get the network outputs and targets
             inputs, targets = myUT.move_dev(batch[:-1], self.device)
             outputs = self.net(inputs)
 
-            all_outputs.append
-            all_targets.append
+            all_outputs.append(outputs)
+            all_targets.append(targets)
+            break
 
-            ## Undo the normalisation on the outputs and the targets
-            net_xy = (outputs * targ_sdevs + targ_means) / 1000
-            tru_xy = (targets * targ_sdevs + targ_means) / 1000
-            net_et = T.norm(net_xy, dim=1)
-            tru_et = T.norm(tru_xy, dim=1)
+        ## Combine the lists into single tensors
+        all_outputs = T.cat(all_outputs)
+        all_targets = T.cat(all_targets)
 
-            ## Calculate the performance metrics
-            nev = T.ones_like(tru_et) ## For keeping track of how many events per bin
-            res = ((net_xy - tru_xy)**2).mean(dim=1)
-            lin = (net_et - tru_et) / (tru_et + 1e-8)
-            ang = T.acos( T.sum(net_xy*tru_xy, dim=1) / (net_et*tru_et+1e-8) )**2 ## Calculated using the dot product
+        ## Undo the normalisation on the outputs and the targets
+        net_xy = (all_outputs * self.net.trg_stats[1] + self.net.trg_stats[0]) / 1000
+        tru_xy = (all_targets * self.net.trg_stats[1] + self.net.trg_stats[0]) / 1000
+        net_et = T.norm(net_xy, dim=1)
+        tru_et = T.norm(tru_xy, dim=1)
 
-            ## Combine the performance metrics into a single pandas dataframe
-            combined = T.vstack([nev, res, lin, ang]).T
-            df = pd.DataFrame(myUT.to_np(combined), columns=['n_events']+met_names)
+        ## Calculate the performance metrics
+        res = ((net_xy - tru_xy)**2).mean(dim=1)
+        lin = (net_et - tru_et) / (tru_et + 1e-8)
+        ang = T.acos( T.sum(net_xy*tru_xy, dim=1) / (net_et*tru_et+1e-8) )**2 ## Calculated using the dot product
 
-            ## Add bins in True_ET, we do this manually so we can deal with overflow! No np.digitize!
-            df['True_ET_bins'] = myUT.to_np(T.clamp(tru_et*n_bins/m_bins, 0, n_bins-1).int())
+        ## We save the overall resolution
+        self.avg_res = T.sqrt(res.mean()).item()
 
-            ## Now we make the profiles using groupby, and add to the running totals using the indices
-            groupby = df.groupby('True_ET_bins', as_index=False).sum().to_numpy()
-            binned_totals[groupby[:, 0].astype(int)+1] += groupby[:, 1:]
+        ## Combine the performance metrics into a single pandas dataframe
+        combined = T.vstack([tru_et, res, lin, ang]).T
+        df = pd.DataFrame(myUT.to_np(combined), columns=met_names)
 
-            ## We update the histograms
-            h_net_et += np.histogram(myUT.to_np(net_et), bins=bins)[0]
-            h_tru_et += np.histogram(myUT.to_np(tru_et), bins=bins)[0]
-            h_net_xy += np.histogram2d(*myUT.to_np(outputs).T[[0,1]], bins=bins2d)[0]
-            h_tru_xy += np.histogram2d(*myUT.to_np(targets).T[[0,1]], bins=bins2d)[0]
+        ## Make the profiles in bins of True ET using pandas cut and groupby methods
+        df['TruM'] = pd.cut(df['Tru'], mag_bins, labels=(mag_bins[1:]+mag_bins[:-1])/2)
+        profs = df.drop('Tru', axis=1).groupby('TruM', as_index=False).mean()
+        profs['Res'] = np.sqrt(profs['Res'])
+        profs['Ang'] = np.sqrt(profs['Ang'])
 
-        ## Get the set total and turn into means (and root means)
-        binned_totals[0] = binned_totals.sum(axis=0)
-        binned_totals = binned_totals / (binned_totals[:,0:1]+1e-8)
-        binned_totals[:, r_idx] = np.sqrt(binned_totals[:, r_idx])
+        ## Save the performance profiles
+        profs.to_csv(Path(self.save_dir, self.name, 'perf.csv'), index=False)
+        Path(self.save_dir, self.name, 'MagDist.png')
 
-        ## Flatten the metrics, drop the number of events, create names and make a dataframe
-        metrics = binned_totals[:,1:].flatten(order='F')
-        mcols = [ met+str(i) for met in met_names for i in range(-1, n_bins) ]
-        metric_df = pd.DataFrame( data=[metrics], index=[self.name], columns=mcols )
+        ## Save the Magnitude histograms
+        h_tru_et = np.histogram(myUT.to_np(tru_et), mag_bins, density=True)[0]
+        h_net_et = np.histogram(myUT.to_np(net_et), mag_bins, density=True)[0]
+        myPL.plot_and_save_hists( Path(self.save_dir, self.name, 'MagDist'),
+                                  [h_tru_et, h_net_et],
+                                  ['Truth', 'Outputs'],
+                                  ['MET Magnitude [Gev]', 'Normalised'],
+                                  mag_bins,
+                                  do_csv=True )
 
-        ## Get a dataframe from the class dict
+        ## Save the target contour plots
+        h_tru_tg = np.histogram2d(*myUT.to_np(all_targets).T, trg_bins, density=True)[0]
+        h_net_tg = np.histogram2d(*myUT.to_np(all_outputs).T, trg_bins, density=True)[0]
+        myPL.plot_and_save_contours( Path(self.save_dir, self.name, 'TrgDist'),
+                                     [h_tru_tg, h_net_tg],
+                                     ['Truth', 'Outputs'],
+                                     ['scaled x', 'scaled y'],
+                                     trg_bins,
+                                     do_csv=True )
+
+        ## Save the ex and ey contour plots
+        h_tru_xy = np.histogram2d(*myUT.to_np(tru_xy).T, exy_bins, density=True)[0]
+        h_net_xy = np.histogram2d(*myUT.to_np(net_xy).T, exy_bins, density=True)[0]
+        myPL.plot_and_save_contours( Path(self.save_dir, self.name, 'ExyDist'),
+                                     [h_tru_xy, h_net_xy],
+                                     ['Truth', 'Outputs'],
+                                     ['METx [GeV]', 'METy [GeV]'],
+                                     exy_bins,
+                                     do_csv=True )
+
+        ## Get a dataframe from the class dict and write out
         dict_df = pd.DataFrame.from_dict([self.get_dict()]).set_index('name')
-
-        ## Write the combined dataframe to the csv
-        out_df = pd.concat([metric_df, dict_df], axis=1)
-        out_df.to_csv(Path(self.save_dir, self.name, 'perf.csv'), mode='w')
-
-        ## Normalise the magnitude histograms and save them to file
-        mid_bins =(bins[1:]+bins[:-1])/2
-        h_net_et /= np.sum(h_net_et)
-        h_tru_et /= np.sum(h_tru_et)
-        np.savetxt(Path(self.save_dir, self.name, 'hist_et.csv'), np.vstack([mid_bins, h_net_et, h_tru_et]).T)
-        fig = plt.figure( figsize=(8,4) )
-        ax = fig.add_subplot(111)
-        ax.plot(h_net_et)
-        ax.plot(h_tru_et)
-        fig.savefig(Path(self.save_dir, self.name, 'mplot.png'))
-        plt.close(fig)
-
-        ## Normalise the 2d histograms
-        h_net_xy /= np.sum(h_net_xy)
-        h_tru_xy /= np.sum(h_tru_xy)
-
-        fig = plt.figure( figsize=(8,4) )
-        ax1 = fig.add_subplot(121)
-        ax2 = fig.add_subplot(122)
-        ax1.imshow(h_net_xy.T)
-        ax2.imshow(h_tru_xy.T)
-        fig.savefig(Path(self.save_dir, self.name, 'plot.png'))
-        plt.show()
-        # plt.close(fig)
-
-        test = myPL.projectiontion2D_ndarray(x, y, z)
-        print(test)
-
-        exit()
-        # plt.show()
-        # exit()
-
-        ## Save the 2D histogram to the output folder
-        # hnm = Path( self.save_dir, self.name, 'hist2d.png' )
-        # myPL.save_hist2D( hist2D, hnm, [0, self.bin_max2D, 0, self.bin_max2D ], [[0,self.bin_max2D],[0,self.bin_max2D]] )
-
-        # hnm = Path( self.save_dir, self.name, 'outp2d.png' )
-        # myPL.save_hist2D( outp2D, hnm, [-100, 500, -200, 200 ], [[-100,500],[0,0]] )
+        dict_df.to_csv(Path(self.save_dir, self.name, 'dict.csv'))
 
     def get_dict(self):
         """
         Creates a dictionary using all strings, intergers and floats from the state dict.
         This should be sufficient for recording all hyperparameters for the network.
         """
-        return { k:str(v) for k, v in self.__dict__.items() if isinstance(v, (str, int, float)) }
+        return { k:str(v) for k, v in self.__dict__.items() if isinstance(v, (str, bool, int, float)) }
 
     def update_dict(self, vars):
         """

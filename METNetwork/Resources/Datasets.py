@@ -36,14 +36,14 @@ def buildTrainAndValid(data_dir, v_frac):
     np.random.shuffle(file_list)
 
     ## Split the file list according to the vaid_frac (must have at least 1 train and valid!)
-    n_valid  = np.clip(int(n_files*v_frac), 1, n_files-1)
+    n_valid  = np.clip( int(n_files*v_frac), 1, n_files-1 )
     valid_files = file_list[:n_valid]
     train_files = file_list[n_valid:]
 
     return train_files, valid_files
 
 class StreamMETDataset(IterableDataset):
-    def __init__(self, file_list, inpt_list, n_ofiles, chnk_size, weight_to, weight_ratio, weight_shift):
+    def __init__(self, file_list, var_list, n_ofiles, chnk_size, weight_type, weight_to, weight_ratio, weight_shift):
         """
         An iterable dataset for when the training set is too large to hold in memory.
         Also applies a weight for each event, which is either used for sampling or for use in the loss function
@@ -62,7 +62,7 @@ class StreamMETDataset(IterableDataset):
                              ^  ( buffer_size ) ^
         Args:
             file_list: A python list of file names (with directories) to open for the epoch
-            inpt_list: A list of strings indicating which input variables should be loaded from memory
+            var_list:  A list of strings indicating which variables should be loaded from memory
             n_ofiles:  An int of the number of files to read from simultaneously
                        Larger n_ofiles means that the suffling between epochs is closer to a real shuffling
                        of the dataset, but it will result in more memory used.
@@ -72,15 +72,13 @@ class StreamMETDataset(IterableDataset):
 
         ## Class attributes
         self.file_list = file_list
+        self.var_list = var_list
         self.n_ofiles = n_ofiles
         self.chnk_size = chnk_size
 
-        ## The list of variables to read from the hdf files, combining the input list with the target information
-        self.var_list = inpt_list + ['True_EX', 'True_EY', 'Raw_True_ET', 'Raw_True_EX', 'Raw_True_EY']
-
         ## Booleans indicating whether we need to be calculating and applying event weights
         self.weight_exist = bool(weight_to) or bool(weight_shift) ## Fixed for duration of the class
-        self.do_weights = True ## Toggled on and off for performance testing
+        self.do_weights = self.weight_exist ## Toggled on and off for performance testing
 
         ## Iterate through a files and calculate the number of events
         self.n_samples = 0
@@ -90,8 +88,8 @@ class StreamMETDataset(IterableDataset):
 
         ## Initialise a class which calculates a per event weight based on a True ET miss histogram file (in same folder as data)
         if self.weight_exist:
-            hist_file = Path(file_list[0].parent.absolute(), 'hist.csv')
-            self.SW = myWT.SampleWeight(hist_file, weight_to, weight_ratio, weight_shift)
+            folder = file_list[0].parent.absolute()
+            self.SW = myWT.SampleWeight(folder, weight_type, weight_to, weight_ratio, weight_shift)
 
     def shuffle_files(self):
         np.random.shuffle(self.file_list) ## Should be called before iterating
@@ -138,23 +136,18 @@ class StreamMETDataset(IterableDataset):
                 buffer = self.load_chunks(ofiles, c_count)
 
                 ## If the returned buffer is empty there are no more events in these files!
-                if not buffer.nelement():
+                if not buffer.size:
                     break
 
-                ## Iterate through the batches taken from the buffer
-                for sample in buffer:
+                ## Calculate all weights for the buffer using the final 3 variables (truth) in one go
+                weights = self.SW.apply(buffer[:, -3:]) if self.do_weights else np.ones(len(buffer))
 
-                    ## Read the information contained in the sample
-                    inputs  = sample[:-5]
-                    targets = sample[-5:-3]
-                    truth = sample[-3:]
-
-                    ## Calculate the weight (1 by default, 0 if failed random threshold)
-                    weight = self.SW.apply(truth) if self.do_weights else 1
+                ## Iterate through the samples taken from the buffer
+                for sample, weight in zip(buffer, weights):
 
                     ## Yield the event if the weight it is non-zero (skips the event otherwise)
                     if weight:
-                        yield inputs, targets, weight
+                        yield sample[:-3], sample[-2:], weight
 
     def load_chunks(self, files, c_count):
 
@@ -169,6 +162,6 @@ class StreamMETDataset(IterableDataset):
             buffer += [ list(event) for event in chunk ] ## Converts the tuples into a list
             hf.close() ## Close the hdf file
 
-        ## Shuffle and return the buffer as a torch tensor so it works with the dataloader's collate function
+        ## Shuffle and return the buffer as a numpy array so it works with weighting and the dataloader's collate function
         np.random.shuffle(buffer)
-        return T.tensor(buffer)
+        return np.array(buffer, dtype=np.float32)

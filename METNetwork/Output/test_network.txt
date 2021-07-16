@@ -1,0 +1,105 @@
+A metadata file for:
+-> test_network.onnx : A trained MLP for missing transverse momentum reconstruction converted from Pytorch
+
+author : Matthew Leigh, University of Geneva, matthew.leigh@cern.ch
+date : 09/07/21
+trained_at : Unversity of Geneva High Performance Computing Center (Baobab)
+training_set : mc16_13TeV.410470.PhPy8EG_A14_ttbar_hdamp258p75_nonallhad.deriv.DAOD_PHYS.e6337_s3126_r10724_p4355
+AthenaRelease : AthAnalysis 21.2.170
+PytorchVersion : 1.9.0
+OnnxVersion : 1.9.0
+
+The following (baseline) object selections were used to derive the inputs for training.
+It is highly advised that you stick to these configurations:
+Ele.Pt : 10 GeV
+Ele.Eta : 2.47
+Ele.Id : LooseAndBLayerLLH
+Ele.CrackVeto : False
+Ele.z0 : 0.5
+Muon.Pt : 10 GeV
+Muon.Eta : 2.7
+Muon.Id : Medium
+Muon.z0 : 0.5
+Photon.Pt : 25 GeV
+Photon.Eta : 2.37
+Photon.Id : Tight
+Jet.Pt : 20 GeV
+
+The network was configured and trained using the following hyper-parameters.
+name : Test
+save_dir : /home/matthew/Documents/PhD/Saved_Networks/tmp/
+act : lrlu
+depth : 1
+width : 32
+nrm : False
+drpt : 0.0
+dev : auto
+data_dir : /home/matthew/Documents/PhD/Data/METData/Rotated/
+v_frac : 0.5
+n_ofiles : 32
+chnk_size : 1024
+b_size : 1024
+n_workers : 4
+weight_type : mag
+weight_to : 0.0
+weight_ratio : 0.0
+weight_shift : 0.0
+n_train_files : 15
+n_valid_files : 14
+train_size : 1011130
+valid_size : 878837
+opt_nm : adam
+lr : 0.0001
+reg_loss_nm : hbloss
+dst_loss_nm : enrgyd
+dst_weight : 0.0
+grad_clip : 0.0
+do_dst : False
+num_epochs : 32
+patience : 25
+avg_res : 39.6074104309082
+
+The network uses only the following variables produced by the METNet tool.
+Tight_Sig
+Loose_Sig
+Tghtr_Sig
+FJVT_Sig
+Calo_Sig
+Tight_RefJet_EX
+Tight_RefJet_EY
+Tight_RefJet_SumET
+Loose_RefJet_EX
+Loose_RefJet_EY
+Loose_RefJet_SumET
+Tghtr_RefJet_EX
+Tghtr_RefJet_EY
+Tghtr_RefJet_SumET
+FJVT_RefJet_EX
+FJVT_RefJet_EY
+FJVT_RefJet_SumET
+Tight_Muons_EX
+Tight_Muons_EY
+Tight_Muons_SumET
+Tight_RefEle_EX
+Tight_RefEle_EY
+Tight_RefEle_SumET
+Tight_RefGamma_EX
+Tight_RefGamma_EY
+Tight_RefGamma_SumET
+Loose_PVSoftTrk_EX
+Loose_PVSoftTrk_EY
+Loose_PVSoftTrk_SumET
+Calo_SoftClus_EX
+Calo_SoftClus_EY
+Calo_SoftClus_SumET
+ActMu
+NVx_2Tracks
+NVx_4Tracks
+PV_NTracks
+N_Muons
+N_Ele
+N_Gamma
+N_Jets
+N_FWD_Jets
+SumET_FWD_Jets
+Sum_JetPU

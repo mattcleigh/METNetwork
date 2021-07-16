@@ -18,6 +18,8 @@ setup(
         'numpy',
         'scipy',
         'torch',
+        'onnx',
+        'onnxruntime',
         'tqdm',
         'pandas',
         'dask',
