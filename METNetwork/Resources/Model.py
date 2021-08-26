@@ -12,7 +12,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 import METNetwork.Resources.Utils as myUT
-import METNetwork.Resources.Modules as myML
+import METNetwork.Resources.Networks as myNW
 import METNetwork.Resources.Plotting as myPL
 import METNetwork.Resources.Datasets as myDS
 
@@ -21,43 +21,49 @@ class METNET_Agent:
         self.name = name
         self.save_dir = save_dir
 
-    def setup_network(self, inpt_list, act, depth, width, nrm, drpt, dev='auto'):
-        """
+    def setup_network(self, do_rot, inpt_rmv, act, depth, width, nrm, drpt, dev='auto'):
+        '''
         This initialises the mlp network with the correct size based on the number of parameters
         specified by the input list created in setup_dataset
-        """
+        '''
         print()
         print('Seting up the neural network')
 
         ## Update our information dictionary
         self.update_dict(locals())
 
-        ## Creating the neural network
-        self.net = myML.METNetwork( inpt_list, n_out=2, depth=depth, width=width, act_h=act, nrm=nrm, drp=drpt)
+        ## Creating the neural network with the input list
+        self.inpt_list = myUT.setup_input_list(inpt_rmv, do_rot)
+        self.net = myNW.METNetwork(self.inpt_list, do_rot, n_out=2, depth=depth, width=width, act_h=act, nrm=nrm, drp=drpt)
 
         ## Select the device and move the network
         self.device = myUT.sel_device(dev)
         self.net.to(self.device)
 
-    def setup_dataset(self, data_dir, v_frac, n_ofiles, chnk_size, b_size, n_workers, weight_type, weight_to, weight_ratio, weight_shift):
-        """
+    def setup_dataset(self, data_dir, v_frac, n_ofiles, chnk_size, b_size, n_workers, weight_type, weight_to, weight_ratio, weight_shift, no_trn=False):
+        '''
         Initialise the train and validation datasets to be used
-        """
+        '''
         print()
         print('Seting up the datasets')
 
         ## Update our information dictionary
         self.update_dict(locals())
 
+        ## The base directory of our training data depends on our method of pre-processing
+        self.data_dir = Path(data_dir, 'Rotated' if self.do_rot else 'Raw')
+
         ## Read in the dataset statistics and save them to the network's buffers
         all_stats = T.tensor(pd.read_csv(Path(self.data_dir, 'stats.csv')).to_numpy(), dtype=T.float32, device=self.device)
         self.net.set_statistics(all_stats)
 
         ## Build the list of files that will be used in the train and validation set
-        train_files, valid_files = myDS.buildTrainAndValid(data_dir, v_frac)
+        train_files, valid_files = myDS.buildTrainAndValid(self.data_dir, v_frac)
 
-        ## Get the iterable dataset objects
+        ## Get the iterable dataset objects, building the list of columns to read from the HDF files
         dataset_args = (self.inpt_list + ['True_ET', 'True_EX', 'True_EY'], n_ofiles, chnk_size, weight_type, weight_to, weight_ratio, weight_shift)
+        if no_trn:
+            train_files = train_files[:2]
         train_set = myDS.StreamMETDataset(train_files, *dataset_args)
         valid_set = myDS.StreamMETDataset(valid_files, *dataset_args)
 
@@ -75,10 +81,10 @@ class METNET_Agent:
         print('train set: {:4} files containing {} samples'.format(self.n_train_files, self.train_size))
         print('valid set: {:4} files containing {} samples'.format(self.n_valid_files, self.valid_size))
 
-    def setup_training(self, opt_nm, lr, reg_loss_nm, dst_loss_nm, dst_weight, grad_clip):
-        """
+    def setup_training(self, opt_nm, lr, patience, reg_loss_nm, dst_loss_nm, dst_weight, grad_clip):
+        '''
         Sets up variables used for training, including the optimiser
-        """
+        '''
         print()
         print('Seting up the training scheme')
 
@@ -94,68 +100,67 @@ class METNET_Agent:
         self.opt = myUT.get_opt(opt_nm, self.net.parameters(), lr)
 
         ## The history of the losses and their plots
-        hist_keys = ['tot_loss', 'reg_loss', 'dst_loss']
-        self.history = {prf+key:[] for key in hist_keys for prf in ['train_', 'valid_']}
-        self.hist_plots = {key:myPL.loss_plot(ylabel=key) for key in hist_keys}
+        loss_names = ['tot_loss', 'reg_loss', 'dst_loss']
+        self.loss_hist = {lnm:{set:[] for set in ['train', 'valid']} for lnm in loss_names }
+        self.run_loss = {lnm:myUT.AverageValueMeter() for lnm in loss_names}
 
         self.num_epochs = 0
         self.best_epoch = 0
         self.bad_epochs = 0
 
-    def run_training_loop(self, patience=25):
-        """
+    def run_training_loop(self):
+        '''
         This is the main loop which cycles epochs of train and test
-        It saves the network and checks for early stopping
-        """
-        ## Update our information dictionary
-        self.update_dict(locals())
+        It runs the save method after each epoch and checks for early stopping
+        '''
+        print()
+        print('Running the training loop')
 
         for epc in count(self.num_epochs+1):
             print( '\nEpoch: {}'.format(epc) )
 
             ## Run the test/train cycle
-            self._epoch(is_train=True)
-            self._epoch(is_train=False)
+            self.epoch(is_train=True)
+            self.epoch(is_train=False)
 
-            ## At the end of every epoch we save something, even if it is just logging
+            ## Update the stats
+            self.num_epochs += 1
+            self.best_epoch = np.argmin(self.loss_hist['tot_loss']['valid']) + 1
+            self.bad_epochs = self.num_epochs - self.best_epoch
+
+            ## Save some update
             self.save()
 
-            ## If the validation loss did not decrease, we check if we have exceeded the patience
+            ## If the total validation loss did not decrease, we check if we have exceeded the patience
             if self.bad_epochs:
                 print('Bad Epoch Number: {:}'.format(self.bad_epochs))
-                if self.bad_epochs > patience:
+                if self.bad_epochs > self.patience:
                     print('Patience Exceeded: Stopping training!')
                     return 0
 
-        print('\nMax number of epochs completed!')
-        return 0
+    def epoch(self, is_train = False):
+        '''
+        Performs a single epoch on either the train loader or the validation loader.
+        Updates the running loss with eeach batch and then the loss history
+        '''
 
-    def _epoch(self, is_train = False):
-        """
-        This function performs one epoch of training on data provided by the train_loader
-        It will also update the graphs after a certain number of batches pass
-        """
-        ## Put the nework into training mode (for batch_norm/droput)
+        ## Select the correct data, enable/disable gradients, put the network in the correct mode
         if is_train:
-            flag = 'train'
+            set = 'train'
             loader = self.train_loader
             self.net.train()
+            T.set_grad_enabled(True)
         else:
-            flag = 'valid'
+            set = 'valid'
             loader = self.valid_loader
             self.net.eval()
+            T.set_grad_enabled(False)
 
         ## Before each epoch we make sure weighting is enabled and the files are shuffled
-        T.set_grad_enabled(is_train)
         loader.dataset.weight_on()
         loader.dataset.shuffle_files()
 
-        ## The running losses as a dictionary
-        ## These must correspond to the keys in self.history!!!
-        ## These must be updated during each batch pass!!!
-        run_loss = {'tot_loss':0, 'reg_loss':0, 'dst_loss':0}
-
-        for i, batch in enumerate(tqdm(loader, desc=flag, ncols=80, ascii=True)):
+        for batch in tqdm(loader, desc=set, ncols=80, ascii=True):
 
             ## Zero out the gradients
             if is_train:
@@ -164,7 +169,7 @@ class METNET_Agent:
             ## Move the batch to the network device and break into parts
             inputs, targets, weights = myUT.move_dev(batch, self.device)
 
-            ## Calculate the network output
+            ## Pass through network
             outputs = self.net(inputs)
 
             ## Calculate the weighted batch regression loss
@@ -182,45 +187,25 @@ class METNET_Agent:
                 if self.grad_clip: nn.utils.clip_grad_norm_(self.net.parameters(), self.grad_clip)
                 self.opt.step()
 
-            ## Update the running losses
-            myUT.update_avg_dict(run_loss, (tot_loss.item(), reg_loss.item(), dst_loss.item()), i+1)
-            break
+            ## Update the each of the running losses
+            losses = {'tot_loss':tot_loss, 'reg_loss':reg_loss, 'dst_loss':dst_loss}
+            for lnm, obj in self.run_loss.items():
+                obj.update(losses[lnm].item())
 
-        ## Update the history of the network
-        self.update_history(flag, run_loss)
-
-    def update_history(self, flag, h_dict):
-        """
-        Updates the running history network stored in the dictionary self.history
-        """
-        ## Append the incomming information to the history
-        for k, v in h_dict.items():
-            self.history[flag+'_'+k].append(v)
-
-        ## Calculate the best epoch and the number of bad epochs (only when 'valid')
-        if flag == 'valid':
-            self.num_epochs = len(self.history['valid_tot_loss'])
-            self.best_epoch = np.argmin(self.history['valid_tot_loss']) + 1
-            self.bad_epochs = self.num_epochs - self.best_epoch
+        ## Use the running losses to update the history and reset
+        for lnm, obj in self.run_loss.items():
+            self.loss_hist[lnm][set].append(obj.avg)
+            obj.reset()
 
     def save(self):
-        """
+        '''
         This function saves needed information about the network during training
-        - At the start of training:
-            - creates and clears a save directory using the model name
-        - Every epoch
-            - models   -> A folder containing the network and optimiser versions
-            - info.txt -> A file containing the network setup and description
-            - history.csv -> Recorded loss history of the training performance
-            - history.png -> (Several) plots of the recorded history with their names
-        - When the network validation loss improves
-            - Runs the save_perf method. Details below
-            - perf.csv -> Pandas dataframe performance metrics on the validation set for the best network
-            - dict.csv -> Pandas dataframe of the class hyperparameters of the best network (not as readible as info, but can be merged)
-            - MagDist.csv -> 1D histogram of the reconstructed and true magnitude (post-processed)
-            - TrgDist.csv -> 2D histogram of the reconstructed and true x, y outputs
-            - ExyDist.csv -> 2D histogram of the reconstructed and true x, y vectors (post-processed)
-        """
+        Creates a save directory using the model name into which goes
+            - /models/   -> A folder containing the network and optimiser versions
+            - info.txt   -> A file containing the network setup and description
+            - losses.png -> A multiplot showing the loss history per epoch
+        When the network validation loss improves the save_perf() method is also called. Check method for details.
+        '''
 
         ## The full name of the save directory
         full_name = Path(self.save_dir, self.name)
@@ -236,7 +221,7 @@ class METNET_Agent:
         if self.bad_epochs==0:
             T.save(self.net, Path(model_folder, 'net_best'))
 
-        ## Save a file containing the network setup and description (based on class dict)
+        ## Save a file containing the network setup and description (based on get_gict() )
         with open(Path(full_name, 'info.txt'), 'w') as f:
             for k, v in self.get_dict().items():
                 f.write('{:15} = {}\n'.format(k, str(v)))
@@ -244,60 +229,46 @@ class METNET_Agent:
             f.write('\n\n'+str(self.opt))
             f.write('\n') ## One line for whitespace
 
-        ## Save the loss history using pandas
-        hist_frame = pd.DataFrame.from_dict(self.history)
-        hist_frame.to_csv(path_or_buf=Path(full_name, 'history.csv'), index=False)
-
-        ## Update and save the loss plots
-        for k in self.hist_plots.keys():
-            self.hist_plots[k].save( Path(full_name, k+'.png'), self.history['train_'+k], self.history['valid_'+k] )
+        ## Save a plot of the loss history
+        myPL.plot_multi_loss(Path(full_name, 'losses'), self.loss_hist)
 
         ## If the network is the best, then we also save the performance file
         if self.bad_epochs==0:
             self.save_perf()
 
-    def load(self, flag, get_opt=False):
+    def load(self, dict_only=False):
 
         ## Get the name of the directories
         full_name = Path(self.save_dir, self.name)
-        model_folder = Path(full_name, 'models')
 
         ## Load the network
-        if flag == 'best':
-            self.net = T.load(Path(model_folder, 'net_best'))
-        else:
-            self.net.load_state_dict(T.load(Path(model_folder, 'net_'+flag)))
+        if not dict_only:
+            model_folder = Path(full_name, 'models')
+            self.net.load_state_dict(T.load(Path(model_folder, 'net_latest')))
+            self.opt.load_state_dict(T.load(Path(model_folder, 'opt_latest')))
 
-        ## Load the optimiser
-        if get_opt:
-            self.opt.load_state_dict(T.load(Path(model_folder, 'opt_'+flag)))
-
-        ## Load the previously saved dictionary
+        ## Load the previously saved dictionary and use it to update attributes
         old_dict = pd.read_csv(Path(full_name, 'dict.csv')).to_dict('records')[0]
         self.update_dict(old_dict)
 
-        ## Load the train history
-        self.history = pd.read_csv(Path(full_name, 'history.csv')).to_dict(orient='list')
-        self.num_epochs = len(self.history['valid_tot_loss'])
-        self.best_epoch = np.argmin(self.history['valid_tot_loss']) + 1
-        self.bad_epochs = self.num_epochs - self.best_epoch
-
     def save_perf(self):
-        """
-        This method iterates through the validation set, and in addition to calculating the loss, it also looks
-        at profiles using bins of True ETmiss. This is done both for Tight and for the Network.
-        The binned variables are:
+        '''
+        This method iterates through the validation set, stores and saves several plots.
+
+        perf.csv: Profiles binned in True ET for the following metrics
             - Resolution (x, y)
             - Deviation from linearity
             - Angular Resolution
-        These profiles are combined with information from the class dict to create a performance csv.
-        This performance csv only has two lines: the column names and the values. This is so it can be combined
-        with results from other networks!
-        We also create several a 1D and 2D histograms
+
+        XXXDist.png: Histograms and contours containing
             - 1D distributions of the reconstructed and true et (post-processed)
             - 2D distributions of the reconstructed and true x,y (raw and post-processed)
-        """
-        print('\nImprovement detected! Saving additional information')
+
+        dict.csv:
+            - All the information from get_dict() stored in one line so we can combine with other networks
+        '''
+        print()
+        print('Running performance profiles')
 
         ## The bin setup to use for the profiles
         n_bins = 40
@@ -305,7 +276,7 @@ class METNET_Agent:
         trg_bins = [ np.linspace(-3, 5, n_bins+1), np.linspace(-4, 4, n_bins+1) ]
         exy_bins = [ np.linspace(-50, 250, n_bins+1), np.linspace(-150, 150, n_bins+1) ]
 
-        ## All the networks outputs and targets combined into a single list!
+        ## All the networks outputs and targets for the batch will be combined into one list
         all_outputs = []
         all_targets = []
 
@@ -326,7 +297,6 @@ class METNET_Agent:
 
             all_outputs.append(outputs)
             all_targets.append(targets)
-            break
 
         ## Combine the lists into single tensors
         all_outputs = T.cat(all_outputs)
@@ -353,12 +323,11 @@ class METNET_Agent:
         ## Make the profiles in bins of True ET using pandas cut and groupby methods
         df['TruM'] = pd.cut(df['Tru'], mag_bins, labels=(mag_bins[1:]+mag_bins[:-1])/2)
         profs = df.drop('Tru', axis=1).groupby('TruM', as_index=False).mean()
-        profs['Res'] = np.sqrt(profs['Res'])
+        profs['Res'] = np.sqrt(profs['Res']) ## Res and Ang are RMSE measurements
         profs['Ang'] = np.sqrt(profs['Ang'])
 
         ## Save the performance profiles
         profs.to_csv(Path(self.save_dir, self.name, 'perf.csv'), index=False)
-        Path(self.save_dir, self.name, 'MagDist.png')
 
         ## Save the Magnitude histograms
         h_tru_et = np.histogram(myUT.to_np(tru_et), mag_bins, density=True)[0]
@@ -395,17 +364,17 @@ class METNET_Agent:
         dict_df.to_csv(Path(self.save_dir, self.name, 'dict.csv'))
 
     def get_dict(self):
-        """
+        '''
         Creates a dictionary using all strings, intergers and floats from the state dict.
         This should be sufficient for recording all hyperparameters for the network.
-        """
+        '''
         return { k:str(v) for k, v in self.__dict__.items() if isinstance(v, (str, bool, int, float)) }
 
     def update_dict(self, vars):
-        """
-        Updates the attribute dictionary with new local scope variables (only numbers or strings).
+        '''
+        Updates the attribute dictionary with new local scope variables.
         Much quicker than simply running self.var = var many times.
         We want local variables to be attributes as the entire dictionary is saved later
         allowing us to quickly store model configuration.
-        """
+        '''
         self.__dict__.update( (k,v) for k,v in vars.items() if k != 'self' )

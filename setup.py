@@ -14,6 +14,7 @@ setup(
     packages=find_packages(),
     license='MIT',
     install_requires=[
+        'atlasify',
         'matplotlib',
         'numpy',
         'scipy',
@@ -24,7 +25,7 @@ setup(
         'pandas',
         'dask',
         'h5py',
-        'pytables',
+        'tables',
     ],
     dependency_links=[],
 )

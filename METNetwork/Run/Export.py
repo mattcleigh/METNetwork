@@ -12,7 +12,7 @@ import torch.nn as nn
 
 from METNetwork.Resources import Model
 import METNetwork.Resources.Utils as myUT
-import METNetwork.Resources.Modules as myML
+import METNetwork.Resources.Networks as myNW
 
 class DummyNet(nn.Module):
     def __init__(self, inp, out):
@@ -59,20 +59,20 @@ def addMetaData(name, desc, custom_dict, obj_dict, hyp_dict, inpt_list):
 
 def main():
 
-    ## The output onnx file
+    ## The input and output file names
+    net_folder = '/home/matthew/Documents/PhD/Saved_Networks/tmp/'
+    net_name = 'Base'
     output_name = 'test_network.onnx'
 
-    ## The model to load
-    model = Model.METNET_Agent('Test', '/home/matthew/Documents/PhD/Saved_Networks/tmp/')
-    model.load('best')
+    ## Load the trained network and the model for its dictionary
+    model = Model.METNET_Agent(net_name, net_folder)
+    model.load(dict_only=True)
+    net = T.load(Path(net_folder, net_name, 'models/net_best'))
 
-    ## Configure the model for full pass evaluation
-    model.net.cpu()
-    model.net.eval()
-    model.net.do_proc = True
-
-    # enveloped = myML.EnvelopedModel( model.net.cpu() )
-    # model = DummyNet(77, 2)
+    ## Configure the network for full pass evaluation
+    net.to('cpu')
+    net.eval()
+    net.do_proc = True
 
     # desc = 'A placeholder ONNX model converted from Pytorch, should be used for testing purposes only!'
     desc = 'A trained MLP for missing transverse momentum reconstruction converted from Pytorch'
@@ -104,14 +104,14 @@ def main():
     }
 
     hyp_dict = model.get_dict()
-    inpt_list = np.array(myUT.feature_list())[model.net.inpt_idxes.tolist()]
+    inpt_list = np.array(myUT.feature_list())[net.inpt_idxes.tolist()]
 
     ###################
 
     full_name = '../Output/' + output_name
 
     ## Export the model
-    T.onnx.export( model.net,                            ## The torch model
+    T.onnx.export( net,                                  ## The torch model
                    T.rand((5, 77), dtype=T.float32),     ## A dummy input with the correct size for tracing
                    full_name,                            ## The output name
                    input_names=["input"],                ## The input collection name  ('input'  required by AthAlg tool!)

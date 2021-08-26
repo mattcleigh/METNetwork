@@ -10,50 +10,22 @@ import matplotlib.ticker as ticker
 
 dflt_cycle = plt.rcParams['axes.prop_cycle'].by_key()['color']
 
-class io_plot:
-    """
-    A plot that can be updated interactively using the draw and save method
-    All inheriting objects need to impliment a _update method
-    """
-    def draw(self, *args, **kwargs):
-        self._update(*args, **kwargs)
-        self.fig.canvas.draw()
-        self.fig.canvas.flush_events()
+def plot_multi_loss(path, loss_hist, xlabel="epoch"):
 
-    def save(self, fname, *args, **kwargs):
-        self._update(*args, **kwargs)
-        self.fig.savefig(fname)
+    ## Create the main figure and subplots
+    fig, axes = plt.subplots(len(loss_hist), 1, sharex = True, figsize = (5,10))
 
-class loss_plot(io_plot):
-    """
-    A dual plot for train and validation
-    """
-    def __init__(self, ylabel='', xlabel='epoch'):
-        self.fig = plt.figure(figsize=(5,5))
-        self.ax = self.fig.add_subplot(111)
-        self.ax.set_ylabel(ylabel)
-        self.ax.set_xlabel(xlabel)
-        self.trn_line, = self.ax.plot([], '-r', label='Train')
-        self.vld_line, = self.ax.plot([], '-g', label='Valid')
+    ## Set the axis names
+    for ax, lnm in zip(axes, loss_hist.keys()):
+        ax.set_ylabel(lnm)
 
-    def _update(self, trn_data, vld_data, xdata=None):
-        self.trn_line.set_data(1+np.arange(len(trn_data)), trn_data)
-        self.vld_line.set_data(1+np.arange(len(vld_data)), vld_data)
-        self.ax.legend()
-        self.ax.relim()
-        self.ax.autoscale_view()
-        self.fig.tight_layout()
+        for set, vals in loss_hist[lnm].items():
+            ax.plot(vals, label=set)
 
-def save_hist2D( hist, name, box, ln_coords = [] ):
-    fig = plt.figure(figsize=(5, 5))
-    ax = fig.add_subplot(111)
-    ax.imshow( np.log(hist+1), origin='lower', extent = box )
-    if len(ln_coords) > 0:
-        ax.plot( *ln_coords, 'k-' )
-    ax.set_xlabel( 'True MET [GeV]' )
-    ax.set_ylabel( 'Network MET [GeV]' )
-    plt.tight_layout()
-    fig.savefig( name )
+    axes[0].legend()
+    fig.tight_layout()
+    fig.savefig(path.with_suffix('.png'))
+    plt.close(fig)
 
 def contour_with_project(inputarrays, labels, ax_labels, bins):
     """
@@ -101,19 +73,23 @@ def contour_with_project(inputarrays, labels, ax_labels, bins):
 
     ## Add the data
     for i, data in enumerate(inputarrays):
-        comb_ax.contour(*mid_bins, gaussian_filter(data.T, 0.7), colors=dflt_cycle[i], levels=10)
+        comb_ax.contour(*mid_bins, gaussian_filter(data.T, 0.4), colors=dflt_cycle[i], levels=15)
         marx_ax.step(bins[0], [0]+np.sum(data, axis=1).tolist(), color=dflt_cycle[i], label=labels[i] )
         mary_ax.step([0]+np.sum(data, axis=0).tolist(), bins[1], color=dflt_cycle[i] )
     marx_ax.legend()
+
+    ## making sure the histograms start at zero (after plotting to autoscale)
+    marx_ax.set_ylim(bottom=0)
+    mary_ax.set_xlim(left=0)
 
     return fig
 
 def plot_and_save_contours(path, hist_list, labels, ax_labels, bins, do_csv=False):
 
-    mid_bins = [ ( b[1:] + b[:-1] ) / 2 for b in bins ]
 
     ## Save the histograms to text
     if do_csv:
+        mid_bins = [ ( b[1:] + b[:-1] ) / 2 for b in bins ]
         np.savetxt(path.with_suffix('.csv'), np.vstack(mid_bins+hist_list))
 
     ## Create and save contour plots of the histograms
@@ -123,10 +99,9 @@ def plot_and_save_contours(path, hist_list, labels, ax_labels, bins, do_csv=Fals
 
 def plot_and_save_hists(path, hist_list, labels, ax_labels, bins, do_csv=False):
 
-    mid_bins = (bins[1:] + bins[:-1]) / 2
-
     ## Save the histograms to text
     if do_csv:
+        mid_bins = (bins[1:] + bins[:-1]) / 2
         df = pd.DataFrame( np.vstack([mid_bins]+hist_list).T, columns=['bins']+labels )
         df.to_csv(path.with_suffix('.csv'), index=False)
 
@@ -137,6 +112,7 @@ def plot_and_save_hists(path, hist_list, labels, ax_labels, bins, do_csv=False):
     ax.set_xlabel(ax_labels[0])
     ax.set_ylabel(ax_labels[1])
     ax.set_xlim(bins[0], bins[-1])
+    ax.set_ylim(bottom=0)
     ax.legend()
     fig.savefig(path.with_suffix('.png'))
     plt.close(fig)

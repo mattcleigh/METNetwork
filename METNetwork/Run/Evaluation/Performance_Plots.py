@@ -49,46 +49,51 @@ class prof_plt(hist_plt):
 
 def main():
 
-    ## Some plottign configurations
+    ## Some plotting configurations
     mpl.rcParams['lines.linewidth'] = 1.5
     at.monkeypatch_axis_labels()
 
     ## The input arguments
-    process = 'ZZ'
-    flag = r'$ZZ$'
+    process = 'HZ'
+    # flag = r'$WW \rightarrow l\nu l\nu$'
+    # flag = r'$ (VBF) H \rightarrow WW \rightarrow l\nu l\nu$'
+    flag = r'$(VBF) H \rightarrow ZZ \rightarrow 4\nu$'
+    # flag = r'$Z \rightarrow \mu\mu$'
 
     ## Some useful strings for plotting
     set = r'Tight $\Sigma p_\mathrm{T}$ [GeV]'
     etm = r'$p_\mathrm{T}^\mathrm{miss}$ [GeV]'
     res = r'$p_{x}^\mathrm{miss}, p_{y}^\mathrm{miss}$ RMSE [GeV]'
     dln = r'$\Delta_\mathrm{T}^\mathrm{lin}$'
+    int = r'Interactions per crossing $\langle\mu\rangle$'
 
     ## Register the working points
     wp_list = [
+                WP('True',         'True',        'black',     '-'),
                 # WP('Track_Final',  'Track',       'lawngreen',    'P'),
                 # WP('Calo_Final',   'Calo',        'darkgreen',    'd'),
                 # WP('FJVT_Final',   'FJVT',      'pink',       's'),
                 # WP('Loose_Final',  'Loose',     'cyan',      '>'),
                 WP('Tight_Final',  'Tight',       'blue',       '<'),
                 # WP('Tghtr_Final',  'Tigher',    'darkblue',  '^'),
-                WP('Normal',       'Normal',      'red',     'o'),
-                WP('NoCalo',       'NoCalo',  'green',       'P'),
-                WP('NoTrack',      'NoTrack', 'brown',       'd'),
-                WP('Neither',      'Neither', 'pink',       '>'),
-                WP('True',         'True',        'black',     '-'),
+                \
+                # WP('Base',  'Normal', 'red', 'o'),
+                WP('Flat_Indep',  'Flat_Indep',  'brown', 'd'),
+                # WP('NoRot', 'NoRot',  'pink', 's'),
+                WP('NoRotSinkIndep', 'NoRotSinkIndep',  'red', 's'),
                 ]
 
     ## The variables to be binned for histogram comparisons between working points
     hist_list = [
-        hist_plt( 'ET', etm, 'Normalised Entries / 12 GeV', l=0, b=1e-8, t=0.048, r=300 )
+        hist_plt( 'ET', etm, 'Normalised Entries', l=0, b=1e-8, t=0.025, r=400 )
              ]
 
     ## All of the variables to be binned for the x_axis
     prof_list = [
-        prof_plt( 'True_ET',           'RMSE', 'True '+etm, res, b=8, t=90),
-        prof_plt( 'ActMu',             'RMSE', r'Interactions per crossing $\langle\mu\rangle$', res, b=15, t=40),
-        prof_plt( 'Tight_Final_SumET', 'RMSE',  set, res, b=15, t=100),
-        prof_plt( 'True_ET',           'DLin', 'True '+etm, dln, b=-0.53, t=1.25, l=15, r=300 )
+        prof_plt( 'True_ET',           'RMSE', 'True '+etm, res, b=15, t=45),
+        prof_plt( 'ActMu',             'RMSE', int, res, b=10, t=35),
+        prof_plt( 'Tight_Final_SumET', 'RMSE', set, res, b=10, t=95),
+        prof_plt( 'True_ET',           'DLin', 'True '+etm, dln, b=-0.2, t=0.6, l=30, r=400 )
               ]
 
     ## Open the input files
@@ -115,8 +120,8 @@ def main():
         for wp in wp_list:
 
             if h in hist_list:
-                ax.step(  *finish_step(df.index, df[wp.name+'_'+h.yname], hbw), color=wp.colour, label=wp.label )
-                rax.step( *finish_step(df.index, df[wp.name+'_'+h.yname]/df['True_'+h.yname], hbw), color=wp.colour )
+                ax.step(  *finish_step(df.index, df[wp.name+'_'+h.yname], hbw), color=wp.colour, label=wp.label, where='post' )
+                rax.plot( df.index, df[wp.name+'_'+h.yname]/df['True_'+h.yname], '-'+wp.fmt, color=wp.colour )
             else:
                 if wp.name == 'True': continue
                 ax.errorbar( df.index, df[wp.name+'_'+h.yname], xerr=hbw, fmt=wp.fmt, color=wp.colour, label=wp.label )
@@ -125,7 +130,7 @@ def main():
         if h.yname == 'DLin':
             ax.axhline(0, color='k')
 
-        at.atlasify('Simulation', 'work in progress\n' '$\sqrt{s}=13$ TeV\n' + flag)
+        at.atlasify('Simulation', 'Internal\n' '$\sqrt{s}=13$ TeV\n' + flag)
         legend = ax.legend(loc='upper right', fontsize=12)
         legend.get_frame().set_alpha(1)
         legend.get_frame().set_color('white')
@@ -140,7 +145,7 @@ def main():
             rax.set_xlabel(h.xlabel)
             rax.set_ylabel('Ratio to True')
             rax.set_xlim(left=h.l, right=h.r)
-            rax.set_ylim(bottom=0.2, top=1.8)
+            rax.set_ylim(bottom=0.3, top=1.7)
             rax.grid(axis='y')
             fig.tight_layout()
             fig.subplots_adjust(hspace=0.1)
@@ -150,7 +155,7 @@ def main():
             fig.tight_layout()
         fig.savefig( Path(folder, h.key+'.png') )
 
-    plt.show()
+    # plt.show()
 
 if __name__ == '__main__':
     main()

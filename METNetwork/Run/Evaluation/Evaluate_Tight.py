@@ -18,21 +18,22 @@ cmap = plt.get_cmap("turbo")
 
 def main():
 
-    inpt_folder =  "../../../../Data/METData/Rotated/"
-    v_frac = 1.0
+    inpt_folder =  "/mnt/scratch/Data/METData/"
+    v_frac = 0.1
 
     ## Create a dummy model as it has all of the loader capabilities and ensure this is exactly what our networks see during training!
-    model = Model.METNET_Agent('Tight', '/home/matthew/Documents/PhD/Saved_Networks/tmp/')
-    model.setup_network(['Tight_Final_ET'], None, 1, 5, False, 0, dev='cpu')
-    model.setup_dataset(inpt_folder, v_frac, 32, 1024, 4096, 4, 0, 0, 0, 0)
+    model = Model.METNET_Agent('Tight', '/mnt/scratch/Saved_Networks/Presentation/')
+    model.setup_network(True, 'XXX', None, 1, 5, False, 0, dev='cpu')
+    model.inpt_list = ['Tight_Final_ET']
+    model.setup_dataset(inpt_folder, v_frac, 8, 4096, 4096, 4, 0, 0, 0, 0)
 
-    # The bin setup to use for the profiles
+    ## The bin setup to use for the profiles
     n_bins = 40
     mag_bins = np.linspace(0, 400, n_bins+1)
     trg_bins = [ np.linspace(-3, 5, n_bins+1), np.linspace(-4, 4, n_bins+1) ]
     exy_bins = [ np.linspace(-50, 250, n_bins+1), np.linspace(-150, 150, n_bins+1) ]
 
-    ## All the networks outputs and targets combined into a single list!
+    ## All the networks outputs and targets for the batch will be combined into one list
     all_outputs = []
     all_targets = []
 
@@ -50,17 +51,19 @@ def main():
         ## Get the network outputs and targets
         tight, targets = myUT.move_dev(batch[:-1], model.device)
 
+        ## Undo the processing on Tight
         tight = (tight * model.net.inp_stats[1, :1] + model.net.inp_stats[0, :1]) / 1000
-        tight = T.cat([tight, T.zeros_like(tight)], dim=1)
+        outputs = T.cat([tight, T.zeros_like(tight)], dim=1)
 
-        all_outputs.append(tight)
+        all_outputs.append(outputs)
         all_targets.append(targets)
 
     ## Combine the lists into single tensors
-    net_xy = T.cat(all_outputs)
+    all_outputs = T.cat(all_outputs)
     all_targets = T.cat(all_targets)
 
     ## Undo the normalisation on the outputs and the targets
+    net_xy = all_outputs
     tru_xy = (all_targets * model.net.trg_stats[1] + model.net.trg_stats[0]) / 1000
     net_et = T.norm(net_xy, dim=1)
     tru_et = T.norm(tru_xy, dim=1)
@@ -80,12 +83,11 @@ def main():
     ## Make the profiles in bins of True ET using pandas cut and groupby methods
     df['TruM'] = pd.cut(df['Tru'], mag_bins, labels=(mag_bins[1:]+mag_bins[:-1])/2)
     profs = df.drop('Tru', axis=1).groupby('TruM', as_index=False).mean()
-    profs['Res'] = np.sqrt(profs['Res'])
+    profs['Res'] = np.sqrt(profs['Res']) ## Res and Ang are RMSE measurements
     profs['Ang'] = np.sqrt(profs['Ang'])
 
     ## Save the performance profiles
     profs.to_csv(Path(model.save_dir, model.name, 'perf.csv'), index=False)
-    Path(model.save_dir, model.name, 'MagDist.png')
 
     ## Save the Magnitude histograms
     h_tru_et = np.histogram(myUT.to_np(tru_et), mag_bins, density=True)[0]

@@ -5,7 +5,7 @@ import torch as T
 import torch.nn as nn
 import torch.optim as optim
 
-import METNetwork.Resources.Modules as myML
+import METNetwork.Resources.Networks as myNW
 
 def mlp_creator( n_in=1, n_out=1, depth=2, width=32,
                  act_h='lrlu', act_o=None, nrm=False, drp=0, widths=[],
@@ -16,15 +16,15 @@ def mlp_creator( n_in=1, n_out=1, depth=2, width=32,
         widths = depth * [ width ]
 
     ## Input block
-    blocks = [ myML.MLPBlock(n_in, widths[0], act_h, nrm, drp) ]
+    blocks = [ myNW.MLPBlock(n_in, widths[0], act_h, nrm, drp) ]
 
     ## Hidden blocks
     for w1, w2 in zip(widths[:-1], widths[1:]):
-        blocks += [ myML.MLPBlock(w1, w2, act_h, nrm, drp) ]
+        blocks += [ myNW.MLPBlock(w1, w2, act_h, nrm, drp) ]
 
     ## Output block, optional for creating seperate streams
     if n_out:
-        blocks += [ myML.MLPBlock(widths[-1], n_out, act_o, False, 0) ]
+        blocks += [ myNW.MLPBlock(widths[-1], n_out, act_o, False, 0) ]
 
     if as_list: return blocks     ## Return as a list if required
     return nn.Sequential(*blocks) ## Otherwise automatically convert to a pytorch squential object
@@ -47,13 +47,15 @@ def get_loss(name, **kwargs):
         'celoss': nn.CrossEntropyLoss(reduction='none', **kwargs),
         'bcewll': nn.BCEWithLogitsLoss(reduction='none', **kwargs),
         'snkhrn': gl.SamplesLoss('sinkhorn', p=1, blur=0.01),
-        'enrgyd': gl.SamplesLoss('energy'),
+        'engmmd': gl.SamplesLoss('energy'),
     }[name]
 
 def get_opt(name, params, lr, **kwargs):
     if   name == 'adam': return optim.Adam(params, lr=lr, **kwargs)
     elif name == 'rmsp': return optim.RMSprop(params, lr=lr, **kwargs)
     elif name == 'sgd':  return optim.SGD(params, lr=lr, **kwargs)
+    else:
+        raise ValueError('No optimiser with name ', name)
 
 def get_grad_norm(model):
     total_norm = 0
@@ -124,9 +126,53 @@ def feature_list():
              'N_Muons', 'N_Ele', 'N_Gamma', 'N_Jets', 'N_FWD_Jets',
              'SumET_FWD_Jets', 'Sum_JetPU', 'Tight_Phi' ]
 
-def full_inpts():
-    inpt_list = feature_list()
-    inpt_list.remove('Tight_Final_EX',)
-    inpt_list.remove('Tight_Final_EY')
-    inpt_list.remove('Tight_Phi')
-    return inpt_list
+
+def setup_input_list(inpt_rmv, do_rot):
+
+    ## Start with the full feature list
+    inputs = feature_list()
+
+    ## We always remove the rotation angle as this is used only for pre-post processing
+    inputs.remove('Tight_Phi')
+
+    ## We remove the tight ex and ey if doing the rotations
+    if do_rot:
+        inputs.remove('Tight_Final_EX')
+        inputs.remove('Tight_Final_EY')
+
+    ## Cycle through all of the inputs
+    for inpt in inputs.copy():
+
+        ## Check against all possible keys
+        for key in inpt_rmv.split(','):
+
+            ## Remove the element if it matches a single key
+            if key in inpt:
+                inputs.remove(inpt)
+                break
+
+    ## In the instance that the input list is empty we let one variable through
+    ## This is to allow dummy networks to be initialised for testing and plotting
+    if not inputs:
+        inputs.append('Tight_Final_ET')
+
+    return inputs
+
+class AverageValueMeter:
+    '''
+    Computes and stores the average, sum, and current value
+    '''
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.val = 0
+        self.avg = 0
+        self.sum = 0
+        self.count = 0
+
+    def update(self, val, n=1):
+        self.val = val
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count

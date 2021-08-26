@@ -33,7 +33,7 @@ class SampleWeight:
             mid_x = source[0]
             mid_y = source[1]
             bin_nrm = (source[0][1] - source[0][0]) * (source[1][1] - source[1][0])
-            hist = gaussian_filter(source[2:], 0.7)
+            hist = gaussian_filter(source[2:], 0.1)
 
         ## Get weights from the 1D histogram of true met magnitude
         elif w_tp == 'mag':
@@ -55,8 +55,8 @@ class SampleWeight:
         ## Calculate the weights for each bin, clipping at the maximum
         weights = np.clip(1.0 / hist, None, max_weight)
 
-        ## For magnitude scaling, dont provide massive weights to the first couple of bins!
-        ## This is a hack solution to some errors we are getting for not scaling up the histogram correctly
+        ## For magnitude scaling, dont provide massive weights to the first two of bins!
+        ## This is a hack solution to fix some errors we are getting for not scaling up the histogram correctly
         if w_tp == 'mag':
             weights[:3] = weights[3]
 
@@ -99,11 +99,11 @@ class SampleWeight:
         if self.w_tp == 'trg':
             trg_x = batch[:, 1]
             trg_y = batch[:, 2]
-            weights = self.f.ev(trg_x, trg_y)
+            weights = self.f.ev(trg_x, trg_y).astype(np.float32)
 
         elif self.w_tp == 'mag':
             true_mag = batch[:, 0]
-            weights = self.f(true_mag)
+            weights = self.f(true_mag).astype(np.float32)
 
         ## Apply the downsampling if required
         if self.thresh:

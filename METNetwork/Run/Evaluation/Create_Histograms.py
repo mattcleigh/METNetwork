@@ -3,6 +3,8 @@ import glob
 import numpy as np
 import pandas as pd
 
+from pathlib import Path
+
 import dask
 import dask.array as da
 import dask.dataframe as dd
@@ -22,18 +24,18 @@ def load_dataframe(data_folder, network_names, req_cols, to_GeV=True):
     print( 'Creating dask dataframe...' )
 
     ## Load the input files and sort
-    inpt_files = glob.glob( data_folder + '*sample.csv' )
+    inpt_files = glob.glob( data_folder + '*1.train-sample.csv' )
     inpt_files.sort()
 
     ## Load the list of each network file
     netw_files = []
     for nw in network_names:
-        nwf = glob.glob( data_folder + '*sample_' + nw + '.csv' )
+        nwf = glob.glob( data_folder + '*1.train-sample_' + nw + '.csv' )
         nwf.sort()
         netw_files.append( nwf )
 
-    # inpt_files = inpt_files[1:]
-    # netw_files = netw_files[1:]
+        if not nwf:
+            raise ValueError('No files found for network: {}'.format(nw))
 
     ## Load all the information using dask and convert into a dask array
     inpt_df = dd.read_csv( inpt_files, usecols=req_cols, dtype=np.float32 )
@@ -52,6 +54,9 @@ def load_dataframe(data_folder, network_names, req_cols, to_GeV=True):
         mev_flags = ['_E','SumET']
         mev_cols  = [ col for col in df.columns if any( fl in col for fl in mev_flags ) ]
         df[mev_cols] /= 1000
+
+    # df = df[(df.N_Muons == 2) & (df.N_Ele == 0)]
+
     return df
 
 
@@ -105,6 +110,11 @@ def save_profiles(df, x_list, y_list, wp_list, out_hdf):
     print('Saving profiles...')
     for x in x_list:
         for y in y_list:
+
+            ## Only do deviation from linearity with etmiss
+            if y == 'DLin' and x.name != 'True_ET':
+                continue
+
             ycols = [ wp+'_'+y for wp in wp_list ]
             xcol  = [ x.name + '_bins' ]
             prof = df[ycols+xcol].groupby(xcol).mean().compute()
@@ -119,14 +129,16 @@ def save_profiles(df, x_list, y_list, wp_list, out_hdf):
 
 def main():
 
-    network_names = ['Normal', 'NoCalo', 'NoTrack', 'Neither']
+    network_names = ['Flat_Indep', 'NoRotSinkIndep']
 
-    data_base_dir = '/mnt/scratch/Data/METData/Raw/'
+    data_base_dir = '/mnt/scratch/Data/METData/Test/'
 
     processes = [
-                  # ('ttbar', 'user.mleigh.21_05_21.FILTERED.ttbar_410470_EXT0/'),
-                  ('WW', 'user.mleigh.02_06_21.FILTERED.WW_361600_EXT0/'),
-                  ('ZZ', 'user.mleigh.02_06_21.FILTERED.ZZ_361604_EXT0/'),
+                  # ('Z',  'user.mleigh.07_07_21.SET.Zmumu_361107_EXT0/'),
+                  # ('WW', 'user.mleigh.07_07_21.SET.WW_361600_EXT0/'),
+                  # ('ZZ', 'user.mleigh.07_07_21.SET.ZZ_361604_EXT0/'),
+                  # ('HW', 'user.mleigh.07_07_21.SET.HW_345948_EXT0/'),
+                  ('HZ', 'user.mleigh.07_07_21.SET.HZ_346600_EXT0/'),
                 ]
 
     req_cols = [ 'Tight_Final_ET', 'Tight_Final_EX', 'Tight_Final_EY', 'Tight_Final_SumET',
@@ -152,15 +164,15 @@ def main():
 
     ## The variables to be binned for histogram comparisons between working points
     h_list = [
-                binned_var( 'ET',  25, [0, 300] ),
+                binned_var( 'ET',  16, [0, 400] ),
              ]
 
 
     ## All of the variables to be binned for the x_axis
     x_list  = [
-                binned_var( 'True_ET',           25, [0, 300]    ),
-                binned_var( 'ActMu',             25, [10, 60]    ),
-                binned_var( 'Tight_Final_SumET', 25, [100, 1200] ),
+                binned_var( 'True_ET',           15, [75, 400]    ),
+                binned_var( 'ActMu',             15, [10, 60]    ),
+                binned_var( 'Tight_Final_SumET', 15, [100, 1000] ),
               ]
 
     ## All of the variables to plot on the y axis these are just flags
@@ -174,8 +186,12 @@ def main():
 
         ## Get the full names of the input and output files
         data_folder = data_base_dir + folder
-        out_hdf = '../../Output/' + proc + '/hists.h5'
-        print(data_folder)
+        out_folder = '../../Output/' + proc
+        out_hdf =  out_folder + '/hists.h5'
+
+        ## Make sure the output folder exists
+        Path(out_folder).mkdir(parents=True, exist_ok=True)
+        print(data_folder, out_folder)
 
         ## Make the histograms
         df = load_dataframe(data_folder, network_names, req_cols) ## Load in all of the information

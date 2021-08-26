@@ -19,21 +19,23 @@ class METNetwork(nn.Module):
     '''
     A network for missing transverse momentum reconstruction. At it's core is a simple and configurable
     multi-layer perceptron. The MLP is enveloped in pre- and post-processing layers, which perform
-     - masking
+     - masking (shrinking input list)
      - scaling
      - rotations
     These outer layers are disabled during training as our trianing datasets
     are already processed!
-    The network stores:
-     - A list of indices to immediately shrink the input list
-     - All the indices of the x and y components in the input list
-     - Stats for the input pre-processing
-     - Stats for the output post-processing
+    For evaluation the network requires the following to be stored in its pytorch buffer:
+     - A list of indices to apply the input mask
+     - The indices of the x and y components in the input list for rotations
+     - Stats for the input standardisation
+     - Stats for the undoing the standardisation
     '''
-    def __init__(self, inpt_list, **mlp_kwargs):
+    def __init__(self, inpt_list, do_rot, **mlp_kwargs):
         super().__init__()
 
         self.do_proc = False
+        self.do_rot = do_rot
+
         self.mlp = myUT.mlp_creator(n_in=len(inpt_list), **mlp_kwargs)
 
         ## Save a mask showing which of the tool's variables are actually used in the neural network
@@ -85,10 +87,11 @@ class METNetwork(nn.Module):
         inpts = inpts[:, self.inpt_idxes]
 
         ## Apply the rotations
-        new_x =   inpts[:, self.x_idxes] * T.cos(angles) + inpts[:, self.y_idxes] * T.sin(angles)
-        new_y = - inpts[:, self.x_idxes] * T.sin(angles) + inpts[:, self.y_idxes] * T.cos(angles)
-        inpts[:, self.x_idxes] = new_x
-        inpts[:, self.y_idxes] = new_y
+        if self.do_rot:
+            new_x =   inpts[:, self.x_idxes] * T.cos(angles) + inpts[:, self.y_idxes] * T.sin(angles)
+            new_y = - inpts[:, self.x_idxes] * T.sin(angles) + inpts[:, self.y_idxes] * T.cos(angles)
+            inpts[:, self.x_idxes] = new_x
+            inpts[:, self.y_idxes] = new_y
 
         ## Apply the standardisation
         inpts = (inpts - self.inp_stats[0]) / self.inp_stats[1]
@@ -101,9 +104,10 @@ class METNetwork(nn.Module):
         output = output * self.trg_stats[1] + self.trg_stats[0]
 
         ## Undo the rotations
-        new_x =   output[:, 0] * T.cos(-angles) + output[:, 1] * T.sin(-angles)
-        new_y = - output[:, 0] * T.sin(-angles) + output[:, 1] * T.cos(-angles)
-        output[:, 0] = new_x
-        output[:, 1] = new_y
+        if self.do_rot:
+            new_x =   output[:, 0] * T.cos(-angles) + output[:, 1] * T.sin(-angles)
+            new_y = - output[:, 0] * T.sin(-angles) + output[:, 1] * T.cos(-angles)
+            output[:, 0] = new_x
+            output[:, 1] = new_y
 
         return output

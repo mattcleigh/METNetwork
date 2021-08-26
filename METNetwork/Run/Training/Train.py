@@ -1,12 +1,13 @@
 import argparse
 import torch.nn as nn
 
+import METNetwork.Resources.Utils as myUT
+
 from METNetwork.Resources import Model
-from METNetwork.Resources.Utils import full_inpts
 
 def str2bool(v):
     if isinstance(v, bool): return v
-    if   v.lower() in ("yes", "true", "t", "y", "1"): return True
+    elif v.lower() in ("yes", "true", "t", "y", "1"): return True
     elif v.lower() in ("no", "false", "f", "n", "0"): return False
     else:
         raise argparse.ArgumentTypeError("Boolean value expected.")
@@ -29,9 +30,19 @@ def get_args():
                          help = "The folder containing the Raw and Rotated datasets",
                          required = True )
 
+    parser.add_argument( "--do_rot",
+                         type = str2bool,
+                         help = "To use Tight rotated data or not",
+                         required = True )
+
     parser.add_argument( "--v_frac",
                          type = float,
                          help = "The fraction of input files reserved for the validation set",
+                         required = True )
+
+    parser.add_argument( "--inpt_rmv",
+                         type = str,
+                         help = "A comma seperated list containing the keys to remove from the input list",
                          required = True )
 
     parser.add_argument( "--n_ofiles",
@@ -109,6 +120,11 @@ def get_args():
                          help = "The optimiser learning rate / step size",
                          required = True )
 
+    parser.add_argument( "--patience",
+                         type = int,
+                         help = "How many bad epochs will the trainer allow before early stopping",
+                         required = True )
+
     parser.add_argument( "--reg_loss_nm",
                          type = str,
                          help = "The name of the loss function to use for regression",
@@ -140,8 +156,7 @@ def print_args(args):
 def pass_blacklist(args):
 
     blacklist = [
-                    ( "weight_to", 0,   "weight_ratio", 0.1 ),
-                    # ( "depth", 5,   "width", 256 ),
+                    ( "weight_to", 0,   "weight_type", 'trg' ),
     ]
 
     for a1, v1, a2, v2 in blacklist:
@@ -151,41 +166,16 @@ def pass_blacklist(args):
 
 def main():
 
-    ## Get and print the arguments
+    ## Collect, print and check the arguments
     args = get_args()
     print_args(args)
-
-    ## Discard blacklisted argument matches
     pass_blacklist(args)
-
-    ## The input list
-    inpt_list = [
-        'Tight_Sig',
-        'Loose_Sig',
-        'Tghtr_Sig',
-        'FJVT_Sig',
-        'Calo_Sig',
-        'Tight_RefJet_EX', 'Tight_RefJet_EY', 'Tight_RefJet_SumET',
-        'Loose_RefJet_EX', 'Loose_RefJet_EY', 'Loose_RefJet_SumET',
-        'Tghtr_RefJet_EX', 'Tghtr_RefJet_EY', 'Tghtr_RefJet_SumET',
-        'FJVT_RefJet_EX', 'FJVT_RefJet_EY', 'FJVT_RefJet_SumET',
-        'Tight_Muons_EX', 'Tight_Muons_EY', 'Tight_Muons_SumET',
-        'Tight_RefEle_EX', 'Tight_RefEle_EY', 'Tight_RefEle_SumET',
-        'Tight_RefGamma_EX', 'Tight_RefGamma_EY', 'Tight_RefGamma_SumET',
-        'Loose_PVSoftTrk_EX', 'Loose_PVSoftTrk_EY', 'Loose_PVSoftTrk_SumET',
-        'Calo_SoftClus_EX', 'Calo_SoftClus_EY', 'Calo_SoftClus_SumET',
-        'ActMu', 'NVx_2Tracks', 'NVx_4Tracks', 'PV_NTracks',
-        'N_Muons', 'N_Ele', 'N_Gamma', 'N_Jets', 'N_FWD_Jets',
-        'SumET_FWD_Jets', 'Sum_JetPU'
-    ]
-
-    # inpt_list = full_inpts()
 
     ## Initialise the model
     model = Model.METNET_Agent(args.name, args.save_dir)
 
     ## Initialise the network
-    model.setup_network(inpt_list, args.act, args.depth, args.width, args.nrm, args.drpt)
+    model.setup_network(args.do_rot, args.inpt_rmv, args.act, args.depth, args.width, args.nrm, args.drpt)
 
     ## Load up the dataset
     model.setup_dataset(args.data_dir, args.v_frac,
@@ -195,7 +185,9 @@ def main():
                         args.weight_ratio, args.weight_shift)
 
     ## Setup up the parameters for training
-    model.setup_training(args.opt_nm, args.lr, args.reg_loss_nm, args.dst_loss_nm, args.dst_weight, args.grad_clip)
+    model.setup_training(args.opt_nm, args.lr,
+                         args.patience, args.reg_loss_nm,
+                         args.dst_loss_nm, args.dst_weight, args.grad_clip)
 
     ## Run the training loop
     model.run_training_loop()

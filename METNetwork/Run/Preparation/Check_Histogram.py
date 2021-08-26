@@ -16,22 +16,23 @@ cmap = plt.get_cmap("turbo")
 
 def main():
 
-    inpt_folder =  "../../../../Data/METData/Rotated/"
+    inpt_folder =  '/mnt/scratch/Data/METData/'
+    do_rot = False
     v_frac = 0.1
 
-    ## The bin structure of the hitsograms
-    n_bins = 80
-    mag_bins = np.linspace(0, 400, n_bins+1)
-    trg_bins = [ np.linspace(-3, 5, n_bins+1), np.linspace(-4, 4, n_bins+1) ]
-    exy_bins = [ np.linspace(-100, 300, n_bins+1), np.linspace(-200, 200, n_bins+1) ]
+    ## The bin structure of the histograms
+    n_bins = 50
+    mag_bins = np.linspace(0, 450, n_bins+1)
+    trg_bins = [ np.linspace(-4, 4, n_bins+1)+do_rot, np.linspace(-4, 4, n_bins+1) ]
+    exy_bins = [ np.linspace(-400, 400, n_bins+1)+100*do_rot, np.linspace(-400, 400, n_bins+1) ]
 
-    ## Choosing the parameters of the tests
+    ## Choosing the parameters weighting tests
     weight_tp    = 'trg'
-    weight_to    = [ 0, 3 ]
+    weight_to    = [ 0, 3.6 ]
     weight_ratio = [ 0 ]
     weight_shift = [ 0 ]
 
-    ## Make all possible options in a grid
+    ## Make all possible test options in a grid
     tests = np.array(np.meshgrid(weight_to, weight_ratio, weight_shift)).T.reshape(-1,3)
 
     ## The list of all the histograms to be filled
@@ -44,8 +45,9 @@ def main():
 
         ## Create a dummy model as it has all of the loader capabilities and ensure this is exactly what our networks see during training!
         model = Model.METNET_Agent('dummy', '')
-        model.setup_network(['Tight_Final_ET'], None, 1, 5, False, 0, dev='cpu')
-        model.setup_dataset(inpt_folder, v_frac, 32, 1024, 4096, 4, weight_tp, wt, wr, ws)
+        model.setup_network(do_rot, '', None, 1, 5, False, 0, dev='cpu')
+        model.inpt_list = ['Tight_Final_ET'] ## Restirct how much data nees to be loaded
+        model.setup_dataset(inpt_folder, v_frac, 1, 1000000, 4096, 8, weight_tp, wt, wr, ws, no_trn=True)
 
         ## Initialise the histograms histograms
         mag_hist = np.zeros(n_bins)
@@ -80,12 +82,12 @@ def main():
         trg_list.append(trg_hist)
         exy_list.append(exy_hist)
 
-    names = [ str(t) for t in tests ]
+    names = [ 'Truth', 'Flattened using target space' ]
 
     ## Save the Magnitude histograms
-    myPL.plot_and_save_hists( Path('MagDist'), mag_list, names, ['MET Magnitude [Gev]', 'Normalised'], mag_bins )
-    myPL.plot_and_save_contours( Path('TrgDist'), trg_list, names, ['scaled x', 'scaled y'], trg_bins )
-    myPL.plot_and_save_contours( Path('ExyDist'), exy_list, names, ['METx [GeV]', 'METy [GeV]'], exy_bins )
+    myPL.plot_and_save_hists( Path('MagDistTR'), mag_list, names, [r'$p_\mathrm{T}^\mathrm{miss}$ [GeV]', 'Normalised'], mag_bins )
+    myPL.plot_and_save_contours( Path('TrgDistTR'), trg_list, names, ['scaled x', 'scaled y'], trg_bins, do_csv=True )
+    myPL.plot_and_save_contours( Path('ExyDistTR'), exy_list, names, [r'$p_{x}^\mathrm{miss}$ [GeV]', r'$p_{y}^\mathrm{miss}$ [GeV]'], exy_bins )
 
 if __name__ == "__main__":
     main()

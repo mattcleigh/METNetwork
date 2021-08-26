@@ -32,13 +32,13 @@ def buildTrainAndValid(data_dir, v_frac):
         raise LookupError('No HDF files could be found in ', data_dir)
 
     ## Shuffle with the a set random seed
-    np.random.seed(0)
+    np.random.seed(42)
     np.random.shuffle(file_list)
 
     ## Split the file list according to the vaid_frac (must have at least 1 train and valid!)
     n_valid  = np.clip( int(n_files*v_frac), 1, n_files-1 )
     valid_files = file_list[:n_valid]
-    train_files = file_list[n_valid:]
+    train_files = file_list[n_valid:] ## Hacky solution to allow plotting method to use all valid
 
     return train_files, valid_files
 
@@ -48,13 +48,16 @@ class StreamMETDataset(IterableDataset):
         An iterable dataset for when the training set is too large to hold in memory.
         Also applies a weight for each event, which is either used for sampling or for use in the loss function
 
-        Works with multithreading:
-         - Each thread has a assigned multiple hdf files that it will work on over the epoch (its worker_files).
-            - Each thread selects a set number of files to have open at a time (its ofiles_list).
-                - Each thread reads a chunk from each of its open files to fill a buffer which is shuffled.
-                    - Each thread then iterates through the buffer
-                - When the buffer is empty the thread loads new chucks from its o_files
-            - When the o_files are empty then it opens a new set from its file list
+        Works with multithreading.
+        Epoch start:
+         - Each thread is assigned a mututally explusive collection of HDF files (its worker_files).
+         - Each thread groups its assigned files into mini collections of size n_ofiles (its ofiles_list).
+         - Each thread loops through its mini collection of files
+             - It reads chunk of data from each file in the mini collection and fills a buffer (shuffled).
+                - It calculates sample weights for the whole buffer
+                    - It loops through the buffer and weights, yeilding samples
+                - When the buffer is empty the thread loads new chucks from each file in the current mini collection
+             - When the mini collection is empty it moves to the next one are empty then it opens a new set from its file list
          - When the file list is empty then the thread is finished for its epoch
 
         Minimal memory footprint. Amount of data stored in memory at given time is:
@@ -62,7 +65,7 @@ class StreamMETDataset(IterableDataset):
                              ^  ( buffer_size ) ^
         Args:
             file_list: A python list of file names (with directories) to open for the epoch
-            var_list:  A list of strings indicating which variables should be loaded from memory
+            var_list:  A list of strings indicating which variables should be loaded from each HDF file
             n_ofiles:  An int of the number of files to read from simultaneously
                        Larger n_ofiles means that the suffling between epochs is closer to a real shuffling
                        of the dataset, but it will result in more memory used.
@@ -76,46 +79,59 @@ class StreamMETDataset(IterableDataset):
         self.n_ofiles = n_ofiles
         self.chnk_size = chnk_size
 
-        ## Booleans indicating whether we need to be calculating and applying event weights
-        self.weight_exist = bool(weight_to) or bool(weight_shift) ## Fixed for duration of the class
-        self.do_weights = self.weight_exist ## Toggled on and off for performance testing
-
         ## Iterate through a files and calculate the number of events
         self.n_samples = 0
         for file in tqdm(self.file_list, desc='Collecting Files', ncols=100, unit='', ascii=True):
             with h5py.File(file, 'r') as hf:
                 self.n_samples += len(hf['data/table'])
 
-        ## Initialise a class which calculates a per event weight based on a True ET miss histogram file (in same folder as data)
+        ## Booleans indicating whether we need to be calculating and applying event weights
+        self.weight_exist = bool(weight_to) or bool(weight_shift) ## Fixed for duration of the class
+        self.do_weights = self.weight_exist ## Toggled on and off for performance testing
+
+        ## Initialise a class which calculates a per event weight based on some histogram in the training folder
         if self.weight_exist:
             folder = file_list[0].parent.absolute()
             self.SW = myWT.SampleWeight(folder, weight_type, weight_to, weight_ratio, weight_shift)
 
     def shuffle_files(self):
-        np.random.shuffle(self.file_list) ## Should be called before iterating
+        '''
+        Shuffles the entire file list, meaning that each worker gets a different subset
+        Should be called inbetween each epoch call
+        '''
+        np.random.shuffle(self.file_list)
 
     def weight_on(self):
+        '''
+        Turns on calculating per sample weights
+        Needed for the training and validation epochs
+        '''
         self.do_weights = self.weight_exist
 
     def weight_off(self):
+        '''
+        Turns off calculating per sample weights
+        Needed for the performance evaluation steps
+        '''
         self.do_weights = False
 
     def __len__(self):
         return self.n_samples
 
     def __iter__(self):
-        """ This function is called whenever an iterator is created on the
-            dataloader responsible for this training set.
-            ie: Every 'for batch in dataloader' call
+        '''
+        Called automatically whenever an iterator is created on the
+        dataloader responsible for this dataset set.
+        ie: Whenever 'for batch in dataloader: ...' is executed
 
-            This function is called SEPARATELY for each thread
-            Think of it as a worker initialise function
-        """
+        This function is called SEPARATELY for each thread
+        Think of it as a worker (thread) initialise function
+        '''
 
         ## Get the worker info
         worker_info = T.utils.data.get_worker_info()
 
-        ## If it is None, we are doing single process loading, worker uses whole file list
+        ## If it is None we are doing single process loading, worker uses whole file list
         if worker_info is None:
             worker_files = self.file_list
 
@@ -145,21 +161,21 @@ class StreamMETDataset(IterableDataset):
                 ## Iterate through the samples taken from the buffer
                 for sample, weight in zip(buffer, weights):
 
-                    ## Yield the event if the weight it is non-zero (skips the event otherwise)
+                    ## Yield the event if the weight is non-zero (skips the event otherwise)
                     if weight:
                         yield sample[:-3], sample[-2:], weight
 
     def load_chunks(self, files, c_count):
 
-        ## Work out the bounds of the new chunk
+        ## Work out the bounds of the new chunk within the file
         start = c_count * self.chnk_size
         stop = start + self.chnk_size
 
         buffer = []
         for f in files:
             hf = h5py.File(f, 'r') ## Open the hdf file
-            chunk = hf['data/table'][start:stop][self.var_list].tolist() ## Returns a list of tuples
-            buffer += [ list(event) for event in chunk ] ## Converts the tuples into a list
+            chunk = hf['data/table'][start:stop][self.var_list] ## Returns np array of tuples
+            buffer += [ list(event) for event in chunk ] ## Converts into a list of lists
             hf.close() ## Close the hdf file
 
         ## Shuffle and return the buffer as a numpy array so it works with weighting and the dataloader's collate function
