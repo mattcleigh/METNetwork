@@ -16,7 +16,7 @@ def main():
     with T.no_grad():
 
         ## The main directory to load the data from
-        data_folder = '/mnt/scratch/Data/METData/Test/*SET.HZ*/'
+        data_folder = '/mnt/scratch/Data/METData/Test/*/'
 
         ## A list of the network names and the name of the csv file to add to the datafiles
         network_folder = '/mnt/scratch/Saved_Networks/'
@@ -44,7 +44,7 @@ def main():
             raise ValueError('No input files found')
 
         ## Dont do Zmumu for now
-        # all_files = [x for x in all_files if 'Zmumu' not in x]
+        all_files = [x for x in all_files if 'Zmumu' not in x]
 
         ## Cycle through the requested networks
         for network_file, network_name in network_names:
@@ -53,7 +53,7 @@ def main():
             net = T.load(Path(network_folder, network_file, file_suffix))
 
             ## Configure the network for full pass evaluation
-            # net.to('cuda')
+            net.to('cuda')
             net.eval()
             net.do_proc = True
 

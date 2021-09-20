@@ -40,7 +40,7 @@ class METNET_Agent:
         self.device = myUT.sel_device(dev)
         self.net.to(self.device)
 
-    def setup_dataset(self, data_dir, v_frac, n_ofiles, chnk_size, b_size, n_workers, weight_type, weight_to, weight_ratio, weight_shift, no_trn=False):
+    def setup_dataset(self, data_dir, v_frac, n_ofiles, chnk_size, b_size, n_workers, weight_type, weight_to, weight_shift, weight_ratio, no_trn=False):
         '''
         Initialise the train and validation datasets to be used
         '''
@@ -61,11 +61,11 @@ class METNET_Agent:
         train_files, valid_files = myDS.buildTrainAndValid(self.data_dir, v_frac)
 
         ## Get the iterable dataset objects, building the list of columns to read from the HDF files
-        dataset_args = (self.inpt_list + ['True_ET', 'True_EX', 'True_EY'], n_ofiles, chnk_size, weight_type, weight_to, weight_ratio, weight_shift)
+        dataset_args = (self.inpt_list + ['True_ET', 'True_EX', 'True_EY'], n_ofiles, chnk_size, weight_type, weight_to, weight_shift)
         if no_trn:
-            train_files = train_files[:2]
-        train_set = myDS.StreamMETDataset(train_files, *dataset_args)
-        valid_set = myDS.StreamMETDataset(valid_files, *dataset_args)
+            train_files = train_files[:1]
+        train_set = myDS.StreamMETDataset(train_files, *dataset_args, weight_ratio)
+        valid_set = myDS.StreamMETDataset(valid_files, *dataset_args, 0.0) ## Validation never uses sampling (too noisy)
 
         ## Create the pytorch dataloaders (works for both types of datset)
         loader_kwargs = {'batch_size':b_size, 'num_workers':n_workers, 'drop_last':True, 'pin_memory':True}
@@ -144,7 +144,7 @@ class METNET_Agent:
         Updates the running loss with eeach batch and then the loss history
         '''
 
-        ## Select the correct data, enable/disable gradients, put the network in the correct mode
+        ## Select the correct data, enable/disable sampling, enable/disable gradients, put the network in the correct mode
         if is_train:
             set = 'train'
             loader = self.train_loader

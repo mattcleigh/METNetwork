@@ -60,15 +60,16 @@ def addMetaData(name, desc, custom_dict, obj_dict, hyp_dict, inpt_list):
 def main():
 
     ## The input and output file names
-    net_folder = '/home/matthew/Documents/PhD/Saved_Networks/tmp/'
-    net_name = 'Base'
-    output_name = 'test_network.onnx'
+    net_folder = '/mnt/scratch/Saved_Networks/Presentation'
+    net_name = '49484133_5_18_08_21'
+    output_name = 'RotatedMagIndep_v0.onnx'
 
     ## Load the trained network and the model for its dictionary
     model = Model.METNET_Agent(net_name, net_folder)
     model.load(dict_only=True)
     net = T.load(Path(net_folder, net_name, 'models/net_best'))
-
+    print(net)
+    
     ## Configure the network for full pass evaluation
     net.to('cpu')
     net.eval()
@@ -119,9 +120,8 @@ def main():
                    dynamic_axes={'input':{0:'batch_size'}, 'output':{0:'batch_size'}}, ## Required for batch_propagation
                    opset_version=11 )                    ## Leave as 11, seems to work fine
 
-    # dd = onnx.load(full_name)
-    # print( onnx.helper.printable_graph(dd.graph) )
-    # exit()
+    dd = onnx.load(full_name)
+    print( onnx.helper.printable_graph(dd.graph) )
 
     ## Add the dictionary to the new model
     addMetaData(full_name, desc, custom_dict, obj_dict, hyp_dict, inpt_list)

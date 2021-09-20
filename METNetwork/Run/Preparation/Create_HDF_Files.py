@@ -98,16 +98,16 @@ def main():
             df[col] = rotated_y[:, i]
 
     ## Get the stats from the entire dataset (compute now to to prevent mem leakage)
-    # print(' -- calculating and saving stats')
-    # mean = df.mean(axis=0).compute()
-    # sdev = df.std(axis=0).compute()
-    # stat_df = pd.concat([mean, sdev], axis=1).transpose()
-    # stat_df.to_csv(Path(output_path, 'stats.csv'), index=False)
+    print(' -- calculating and saving stats')
+    mean = df.mean(axis=0).compute()
+    sdev = df.std(axis=0).compute()
+    stat_df = pd.concat([mean, sdev], axis=1).transpose()
+    stat_df.to_csv(Path(output_path, 'stats.csv'), index=False)
 
-    print(' -- loading previously saved stats')
-    stat_df = pd.read_csv(Path(output_path, 'stats.csv'))
-    mean = stat_df.iloc[0]
-    sdev = stat_df.iloc[1]
+    # print(' -- loading previously saved stats')
+    # stat_df = pd.read_csv(Path(output_path, 'stats.csv'))
+    # mean = stat_df.iloc[0]
+    # sdev = stat_df.iloc[1]
 
     ## Normalise and fix the column orders (they become alphabetical) we also ensure it will be saved as a float
     normed = (df - mean) / (sdev + 1e-6)
@@ -121,20 +121,20 @@ def main():
     normed.to_hdf(Path(output_path, 'sample-*.h5'), 'data', mode='w', format='table', data_columns=True)
 
     ## Create a histogram based on Truth magnitude
-    # print(' -- creating magnitude histogram')
-    # mag_bins = np.linspace(0, 450e3, 80 + 1)
-    # mag_hist = da.histogram(df['True_ET'], mag_bins, density=True)[0]
-    # mag_hist = mag_hist.compute()
-    # myPL.plot_and_save_hists( Path(output_path, 'MagDist'), [mag_hist], ['Truth'],
-    #                           ['MET Magnitude [Gev]', 'Normalised'], mag_bins, do_csv=True )
+    print(' -- creating magnitude histogram')
+    mag_bins = np.linspace(0, 450e3, 100 + 1)
+    mag_hist = da.histogram(df['True_ET'], mag_bins, density=True)[0]
+    mag_hist = mag_hist.compute()
+    myPL.plot_and_save_hists( Path(output_path, 'MagDist'), [mag_hist], ['Truth'],
+                              ['MET Magnitude [Gev]', 'Normalised'], mag_bins, do_csv=True )
 
     ## Create a histogram using the normed targets
-    # print(' -- creating target space histogram')
-    # trg_bins = [ np.linspace(-300, 500, 40+1), np.linspace(-400, 400, 40+1) ]
-    # trg_hist = da.histogram2d(df['True_EX'].to_dask_array(), df['True_EY'].to_dask_array(), trg_bins, density=True)[0]
-    # trg_hist = trg_hist.compute()
-    # myPL.plot_and_save_contours( Path(output_path, 'TrgDist'), [trg_hist], ['Truth'],
-    #                              ['scaled-x', 'scaled-y'], trg_bins, do_csv=True )
+    print(' -- creating target space histogram')
+    trg_bins = [ np.linspace(-4, 4, 50+1), np.linspace(-4, 4, 50+1) ]
+    trg_hist = da.histogram2d(df['True_EX'].to_dask_array(), df['True_EY'].to_dask_array(), trg_bins, density=True)[0]
+    trg_hist = trg_hist.compute()
+    myPL.plot_and_save_contours( Path(output_path, 'TrgDist'), [trg_hist], ['Truth'],
+                                 ['scaled-x', 'scaled-y'], trg_bins, do_csv=True )
 
 
 if __name__ == '__main__':

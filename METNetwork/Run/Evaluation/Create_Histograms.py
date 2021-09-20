@@ -24,13 +24,13 @@ def load_dataframe(data_folder, network_names, req_cols, to_GeV=True):
     print( 'Creating dask dataframe...' )
 
     ## Load the input files and sort
-    inpt_files = glob.glob( data_folder + '*1.train-sample.csv' )
+    inpt_files = glob.glob( data_folder + '*.train-sample.csv' )
     inpt_files.sort()
 
     ## Load the list of each network file
     netw_files = []
     for nw in network_names:
-        nwf = glob.glob( data_folder + '*1.train-sample_' + nw + '.csv' )
+        nwf = glob.glob( data_folder + '*.train-sample_' + nw + '.csv' )
         nwf.sort()
         netw_files.append( nwf )
 
@@ -170,7 +170,7 @@ def main():
 
     ## All of the variables to be binned for the x_axis
     x_list  = [
-                binned_var( 'True_ET',           15, [75, 400]    ),
+                binned_var( 'True_ET',           15, [70, 400]    ),
                 binned_var( 'ActMu',             15, [10, 60]    ),
                 binned_var( 'Tight_Final_SumET', 15, [100, 1000] ),
               ]

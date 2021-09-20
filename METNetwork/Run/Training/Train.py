@@ -75,14 +75,14 @@ def get_args():
                          help = "The location of the falling edge of the plateau in GeV",
                          required = True )
 
-    parser.add_argument( "--weight_ratio",
-                         type = float,
-                         help = "The maximum allowed loss weight ratio between two events",
-                         required = True )
-
     parser.add_argument( "--weight_shift",
                          type = float,
                          help = "The gradient [-1, 1] of the linear shift applied to the event weights",
+                         required = True )
+
+    parser.add_argument( "--weight_ratio",
+                         type = float,
+                         help = "The maximum allowed loss weight ratio between two events, defines sampling vs weighting",
                          required = True )
 
     parser.add_argument( "--act",
@@ -182,7 +182,7 @@ def main():
                         args.n_ofiles, args.chnk_size,
                         args.b_size, args.n_workers,
                         args.weight_type, args.weight_to,
-                        args.weight_ratio, args.weight_shift)
+                        args.weight_shift, args.weight_ratio)
 
     ## Setup up the parameters for training
     model.setup_training(args.opt_nm, args.lr,

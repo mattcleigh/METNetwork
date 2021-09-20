@@ -54,10 +54,10 @@ def main():
     at.monkeypatch_axis_labels()
 
     ## The input arguments
-    process = 'HZ'
-    # flag = r'$WW \rightarrow l\nu l\nu$'
+    process = 'WW'
+    flag = r'$WW \rightarrow l\nu l\nu$'
     # flag = r'$ (VBF) H \rightarrow WW \rightarrow l\nu l\nu$'
-    flag = r'$(VBF) H \rightarrow ZZ \rightarrow 4\nu$'
+    # flag = r'$(VBF) H \rightarrow ZZ \rightarrow 4\nu$'
     # flag = r'$Z \rightarrow \mu\mu$'
 
     ## Some useful strings for plotting
@@ -85,15 +85,15 @@ def main():
 
     ## The variables to be binned for histogram comparisons between working points
     hist_list = [
-        hist_plt( 'ET', etm, 'Normalised Entries', l=0, b=1e-8, t=0.025, r=400 )
+        hist_plt( 'ET', etm, 'Normalised Entries', l=0, b=0, t=0.025, r=300 )
              ]
 
     ## All of the variables to be binned for the x_axis
     prof_list = [
         prof_plt( 'True_ET',           'RMSE', 'True '+etm, res, b=15, t=45),
-        prof_plt( 'ActMu',             'RMSE', int, res, b=10, t=35),
-        prof_plt( 'Tight_Final_SumET', 'RMSE', set, res, b=10, t=95),
-        prof_plt( 'True_ET',           'DLin', 'True '+etm, dln, b=-0.2, t=0.6, l=30, r=400 )
+        prof_plt( 'ActMu',             'RMSE', int, res, b=18, t=30),
+        prof_plt( 'Tight_Final_SumET', 'RMSE', set, res, b=15, t=60),
+        prof_plt( 'True_ET',           'DLin', 'True '+etm, dln, b=-0.2, t=0.6, l=30, r=300 )
               ]
 
     ## Open the input files

@@ -46,8 +46,9 @@ def get_loss(name, **kwargs):
         'hbloss': nn.HuberLoss(reduction='none', **kwargs),
         'celoss': nn.CrossEntropyLoss(reduction='none', **kwargs),
         'bcewll': nn.BCEWithLogitsLoss(reduction='none', **kwargs),
-        'snkhrn': gl.SamplesLoss('sinkhorn', p=1, blur=0.01),
         'engmmd': gl.SamplesLoss('energy'),
+        'snkhrn': gl.SamplesLoss('sinkhorn', p=1, blur=0.01),
+        'snkhrn2': gl.SamplesLoss('sinkhorn', p=2, blur=0.01),
     }[name]
 
 def get_opt(name, params, lr, **kwargs):
@@ -73,7 +74,7 @@ def sel_device(dev):
     Returns a pytorch device, includes auto option
     """
     if dev=='auto':
-        return T.device('cuda' if T.cuda.is_available() else 'cpu')
+        return T.device('cuda' if T.cuda.is_availabel() else 'cpu')
     else:
         return T.device(dev)
 

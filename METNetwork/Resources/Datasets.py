@@ -30,7 +30,6 @@ def buildTrainAndValid(data_dir, v_frac):
     ## Exit if no files can be found
     if n_files == 0:
         raise LookupError('No HDF files could be found in ', data_dir)
-
     ## Shuffle with the a set random seed
     np.random.seed(42)
     np.random.shuffle(file_list)
@@ -43,7 +42,7 @@ def buildTrainAndValid(data_dir, v_frac):
     return train_files, valid_files
 
 class StreamMETDataset(IterableDataset):
-    def __init__(self, file_list, var_list, n_ofiles, chnk_size, weight_type, weight_to, weight_ratio, weight_shift):
+    def __init__(self, file_list, var_list, n_ofiles, chnk_size, weight_type, weight_to, weight_shift, weight_ratio):
         """
         An iterable dataset for when the training set is too large to hold in memory.
         Also applies a weight for each event, which is either used for sampling or for use in the loss function
@@ -81,7 +80,7 @@ class StreamMETDataset(IterableDataset):
 
         ## Iterate through a files and calculate the number of events
         self.n_samples = 0
-        for file in tqdm(self.file_list, desc='Collecting Files', ncols=100, unit='', ascii=True):
+        for file in tqdm(self.file_list, desc='Collecting Files', unit='', ascii=True):
             with h5py.File(file, 'r') as hf:
                 self.n_samples += len(hf['data/table'])
 
@@ -92,7 +91,7 @@ class StreamMETDataset(IterableDataset):
         ## Initialise a class which calculates a per event weight based on some histogram in the training folder
         if self.weight_exist:
             folder = file_list[0].parent.absolute()
-            self.SW = myWT.SampleWeight(folder, weight_type, weight_to, weight_ratio, weight_shift)
+            self.SW = myWT.SampleWeight(folder, weight_type, weight_to, weight_shift, weight_ratio)
 
     def shuffle_files(self):
         '''

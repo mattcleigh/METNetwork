@@ -1,7 +1,7 @@
 python Train.py \
   --name      NoRotIndepWeighted \
-  --save_dir  ../../../..//Saved_Networks/tmp/ \
-  --data_dir  ../../../..//Data/METData/ \
+  --save_dir  ../../../../Saved_Networks/tmp/ \
+  --data_dir  ../../../../Data/METData/ \
   --do_rot    False \
   --inpt_rmv  Final,_ET \
   --v_frac    0.2 \
@@ -11,8 +11,8 @@ python Train.py \
   --n_workers 4 \
   --weight_type trg \
   --weight_to  3 \
-  --weight_ratio 1.0 \
   --weight_shift 0.0 \
+  --weight_ratio 1.0 \
   --act       silu \
   --depth     10 \
   --width     128 \
@@ -22,6 +22,6 @@ python Train.py \
   --lr        1e-4 \
   --patience  25 \
   --reg_loss_nm hbloss \
-  --dst_loss_nm engmmd \
+  --dst_loss_nm snkhrn \
   --dst_weight 1 \
   --grad_clip 0 \

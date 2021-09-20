@@ -16,7 +16,7 @@ font = font_manager.FontProperties(family='monospace')
 
 def make_name(dict_df):
     dict_df['inpt_rmv'] = 'All' if dict_df['inpt_rmv']=='XXX' else 'Ind'
-    dict_df['dst_weight'] = 'D_On' if float(dict_df['dst_weight'])>0 else 'D_Off'
+    # dict_df['dst_weight'] = 'D_On' if float(dict_df['dst_weight'])>0 else 'D_Off'
     dict_df['weight_type'] = dict_df['weight_type'] if float(dict_df['weight_to'])>0 else ''
     dict_df['weight_to'] = 'W_On' if float(dict_df['weight_to'])>0 else 'W_Off'
     dict_df['do_rot'] = 'R_On' if dict_df['do_rot']=='True' else 'R_Off'
@@ -25,7 +25,7 @@ def make_name(dict_df):
 def join_pad(str_list, pad=6):
     return ''.join([ x.ljust(pad) for x in str_list])
 
-def histo_plot(net_list, use_lables):
+def histo_plot(net_list, use_labels):
 
     ## Create the plot of the histograms
     fig, ax = plt.subplots( figsize = (6,6) )
@@ -40,8 +40,8 @@ def histo_plot(net_list, use_lables):
         histo = np.loadtxt(Path(net, 'MagDist.csv'), usecols=2, skiprows=1, delimiter=',')
         name = Path(net).name
         print(name)
-        if use_lables and name != 'Tight':
-            dict_df = pd.read_csv(net+'/dict.csv', dtype=str)[use_lables]
+        if use_labels and name != 'Tight':
+            dict_df = pd.read_csv(net+'/dict.csv', dtype=str)[use_labels]
             name = join_pad(make_name(dict_df.iloc[0]).to_list())
         print(name)
         print()
@@ -60,7 +60,7 @@ def histo_plot(net_list, use_lables):
     plt.tight_layout()
     fig.savefig( '../../Output/Compare_hist.png')
 
-def metric_plot(net_list, use_lables):
+def metric_plot(net_list, use_labels):
 
     ## Get the list of saved metrics from the first file
     metrics = np.loadtxt(net_list[0]+'/perf.csv', delimiter=',', dtype=str, max_rows=1)[1:]
@@ -78,8 +78,8 @@ def metric_plot(net_list, use_lables):
             ## Get the name of the network to use for the legend
             name = Path(net).name
 
-            if use_lables and name != 'Tight':
-                dict_df = pd.read_csv(net+'/dict.csv', dtype=str)[use_lables]
+            if use_labels and name != 'Tight':
+                dict_df = pd.read_csv(net+'/dict.csv', dtype=str)[use_labels]
                 name = join_pad(make_name(dict_df.iloc[0]).to_list())
 
             ## Load the and plot the performance column
@@ -106,11 +106,12 @@ def metric_plot(net_list, use_lables):
         plt.tight_layout()
         fig.savefig( '../../Output/Compare_' + met +'.png')
 
-def cutNetList(folder, restr, order, top_n):
+def cutNetList(folder, restr, order, top_n, net_list=[]):
 
-    net_list = glob.glob(folder+'*')
+    if not net_list:
+        net_list = glob.glob(folder+'*')
+
     d_list = []
-
     for n in net_list:
         try:
             d_list += [ pd.read_csv(n+'/dict.csv') ]
@@ -129,22 +130,31 @@ def cutNetList(folder, restr, order, top_n):
 
 def main():
 
-    folder = '/mnt/scratch/Saved_Networks/Samples/'
+    folder = '/mnt/scratch/Saved_Networks/NoRotSinkhornIndep/'
 
     order = 'avg_res'
     top_n = 0
     restrict = [
                 # ( 'weight_to', 0 ),
-                # ( 'dst_weight', 0 ),
+                # ( 'weight_shift', 0 ),
+                # ( 'b_size', 1024 ),
                 # ( 'weight_type',  'trg' ),
                 # ( 'inpt_rmv',  'Final,_ET' ),
-                ( 'do_rot',  False )
+                # ( 'do_rot',  False )
                 ]
 
-    use_lables = [ 'do_rot', 'inpt_rmv', 'dst_weight', 'weight_to', 'weight_type' ]
+    use_labels = [ 'do_rot', 'inpt_rmv', 'dst_weight', 'weight_to', 'weight_type', 'b_size' ]
+
+    net_list = [
+        # folder + 'Samples/49525803_0_23_08_21',
+        # folder + 'Presentation/49484133_5_18_08_21',
+        # folder + 'NoRotSinkhornIndep/50173691_2_11_09_21',
+        # folder + 'Presentation/Tight',
+    ]
+
 
     ## Find all the networks and cut the list down based on restrictions
-    net_list = cutNetList(folder, restrict, order, top_n)
+    net_list = cutNetList(folder, restrict, order, top_n, net_list)
 
     ## Setting up the plotting styles
     # color = plt.cm.rainbow(np.linspace(0, 1, len(net_list)))
@@ -153,10 +163,10 @@ def main():
     # plt.rcParams["axes.prop_cycle"] = plt.cycler("color", plt.cm.Set3.colors)
 
     ## Create the metric plots
-    metric_plot(net_list, use_lables)
+    metric_plot(net_list, use_labels)
 
     ## Create the histogram plots
-    histo_plot(net_list, use_lables)
+    histo_plot(net_list, use_labels)
 
 if __name__ == '__main__':
     main()

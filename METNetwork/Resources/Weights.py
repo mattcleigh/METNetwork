@@ -6,6 +6,9 @@ from pathlib import Path
 from scipy.interpolate import interp1d, RectBivariateSpline
 from scipy.ndimage.filters import gaussian_filter
 
+def BiasFunction(x, maxx, bias):
+    k = (1-bias)**3
+    return 1 - x*k / (x*k-x+maxx)
 
 class SampleWeight:
     """
@@ -25,14 +28,15 @@ class SampleWeight:
         w_shf: A gradient of a linear shift applied to all weights
 
     """
-    def __init__(self, folder, w_tp, w_to, w_rat, w_shf):
+    def __init__(self, folder, w_tp, w_to, w_shf, w_rat):
 
         ## Get weights from the 2D histogram or targets
         if w_tp == 'trg':
             source = np.loadtxt(Path(folder, 'TrgDist.csv'))
             mid_x = source[0]
             mid_y = source[1]
-            bin_nrm = (source[0][1] - source[0][0]) * (source[1][1] - source[1][0])
+            mid_r = np.linalg.norm(np.dstack(np.meshgrid(mid_x, mid_y)), axis=-1)
+            bin_nrm = (source[0][1] - source[0][0]) * (source[1][1] - source[1][0]) ## Bin width, used to normalise for expectation values
             hist = gaussian_filter(source[2:], 0.1)
 
         ## Get weights from the 1D histogram of true met magnitude
@@ -40,7 +44,8 @@ class SampleWeight:
             w_to *= 1e5 ## w_to is in hundred GeV
             source = np.loadtxt(Path(folder, 'MagDist.csv'), delimiter=',', skiprows=1)
             mid_x = source[:,0]
-            bin_nrm = mid_x[1] - mid_x[0] ## Bin width, used for expectation values
+            mid_r = mid_x
+            bin_nrm = mid_x[1] - mid_x[0] ## Bin width, used to normalise for expectation values
             hist = source[:,1]
 
         ## Calculate maximum allowed value of the weights calculated at w_to
@@ -58,13 +63,24 @@ class SampleWeight:
         ## For magnitude scaling, dont provide massive weights to the first two of bins!
         ## This is a hack solution to fix some errors we are getting for not scaling up the histogram correctly
         if w_tp == 'mag':
-            weights[:3] = weights[3]
+            weights[:2] = weights[2]
 
-        ## Modify the weights using a linear shift, make sure that m is scaled!
-        if w_tp == 'mag' and w_shf:
+        ## Prevent the magnitude weights from disapearing at zero when using trg
+        if w_tp == 'trg':
+            r = 0.5
+            x_bin = (np.abs(mid_x-r)).argmin()
+            y_bin = (np.abs(mid_y)).argmin()
+            val = weights[y_bin, x_bin]
+            mask = (mid_r < r)
+            weights[mask] = val
+
+        # ## Modify the weights using a linear shift or a bias function
+        if w_shf != 0:
+            # weights = BiasFunction(weights, np.max(weights), w_shf) ## Doesnt really work with sliced samples...
             m = w_shf / w_to ## Calculate a gradient corresponding to inputs between -1 and 1, preventing any negative weights!
             c = (1 - m*w_to) / 2 ## Multiply the weights by the weights by a linear function passing through 0.5 in the mid
-            weights *= np.clip(m * mid_x + c, 0.0, 1)
+            shft = np.clip(m * mid_r + c, 0.0, 1)
+            weights = weights * shft
 
         ## Calculate the weight treshold (v rndm vs loss ^) using the desired weight ratio
         thresh = np.max(weights) * w_rat
@@ -82,7 +98,6 @@ class SampleWeight:
         ## Apply the normalistion factor to the original weights!
         weights /= norm_fac
         thresh  /= norm_fac
-        self.thresh = thresh
 
         ## Can now derive the function using linear interpolation
         if w_tp == 'trg':
@@ -92,6 +107,9 @@ class SampleWeight:
             self.f = interp1d( [0] + mid_x.tolist(),  ## Ensure that the histogram starts at zero
                                [0] + weights.tolist(),
                                kind='cubic', bounds_error=False, fill_value=(0, weights[-1]))
+
+        ## Save the weight threshold, the weighting type and set the do_smpl to true by default
+        self.thresh = thresh
         self.w_tp = w_tp
 
     def apply(self, batch):
