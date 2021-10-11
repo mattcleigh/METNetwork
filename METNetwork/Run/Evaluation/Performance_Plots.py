@@ -54,10 +54,11 @@ def main():
     at.monkeypatch_axis_labels()
 
     ## The input arguments
-    process = 'WW'
-    flag = r'$WW \rightarrow l\nu l\nu$'
+    process = 'HZ'
+    # flag = r'$WW \rightarrow l\nu l\nu$'
+    # flag = r'$ZZ \rightarrow ll \nu\nu$'
     # flag = r'$ (VBF) H \rightarrow WW \rightarrow l\nu l\nu$'
-    # flag = r'$(VBF) H \rightarrow ZZ \rightarrow 4\nu$'
+    flag = r'$(VBF) H \rightarrow ZZ \rightarrow 4\nu$'
     # flag = r'$Z \rightarrow \mu\mu$'
 
     ## Some useful strings for plotting
@@ -78,22 +79,22 @@ def main():
                 # WP('Tghtr_Final',  'Tigher',    'darkblue',  '^'),
                 \
                 # WP('Base',  'Normal', 'red', 'o'),
-                WP('Flat_Indep',  'Flat_Indep',  'brown', 'd'),
+                WP('Flat_Indep',  'RotatedMagIndep',  'brown', 'd'),
                 # WP('NoRot', 'NoRot',  'pink', 's'),
-                WP('NoRotSinkIndep', 'NoRotSinkIndep',  'red', 's'),
+                WP('NoRotSinkIndep', 'NoRotTargSinkIndep',  'red', 's'),
                 ]
 
     ## The variables to be binned for histogram comparisons between working points
     hist_list = [
-        hist_plt( 'ET', etm, 'Normalised Entries', l=0, b=0, t=0.025, r=300 )
-             ]
+        hist_plt( 'ET', etm, 'Normalised Entries', l=0, b=0, t=0.025 ),
+    ]
 
     ## All of the variables to be binned for the x_axis
     prof_list = [
-        prof_plt( 'True_ET',           'RMSE', 'True '+etm, res, b=15, t=45),
-        prof_plt( 'ActMu',             'RMSE', int, res, b=18, t=30),
-        prof_plt( 'Tight_Final_SumET', 'RMSE', set, res, b=15, t=60),
-        prof_plt( 'True_ET',           'DLin', 'True '+etm, dln, b=-0.2, t=0.6, l=30, r=300 )
+        prof_plt( 'True_ET',           'RMSE', 'True '+etm, res, b=15, t=40),
+        prof_plt( 'ActMu',             'RMSE', int, res, b=15, t=30),
+        prof_plt( 'Tight_Final_SumET', 'RMSE', set, res, b=15, t=40),
+        prof_plt( 'True_ET',           'DLin', 'True '+etm, dln, b=-0.2, t=0.6, l=70, r=400 )
               ]
 
     ## Open the input files

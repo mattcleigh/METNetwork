@@ -16,7 +16,7 @@ font = font_manager.FontProperties(family='monospace')
 
 def make_name(dict_df):
     dict_df['inpt_rmv'] = 'All' if dict_df['inpt_rmv']=='XXX' else 'Ind'
-    # dict_df['dst_weight'] = 'D_On' if float(dict_df['dst_weight'])>0 else 'D_Off'
+    dict_df['dst_weight'] = 'D_On' if float(dict_df['dst_weight'])>0 else 'D_Off'
     dict_df['weight_type'] = dict_df['weight_type'] if float(dict_df['weight_to'])>0 else ''
     dict_df['weight_to'] = 'W_On' if float(dict_df['weight_to'])>0 else 'W_Off'
     dict_df['do_rot'] = 'R_On' if dict_df['do_rot']=='True' else 'R_Off'
@@ -130,7 +130,7 @@ def cutNetList(folder, restr, order, top_n, net_list=[]):
 
 def main():
 
-    folder = '/mnt/scratch/Saved_Networks/NoRotSinkhornIndep/'
+    folder = '/mnt/scratch/Saved_Networks/RotDist/'
 
     order = 'avg_res'
     top_n = 0
@@ -143,7 +143,7 @@ def main():
                 # ( 'do_rot',  False )
                 ]
 
-    use_labels = [ 'do_rot', 'inpt_rmv', 'dst_weight', 'weight_to', 'weight_type', 'b_size' ]
+    use_labels = [ 'do_rot', 'inpt_rmv', 'dst_weight', 'weight_to', 'weight_type' ]
 
     net_list = [
         # folder + 'Samples/49525803_0_23_08_21',

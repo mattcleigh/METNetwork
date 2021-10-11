@@ -74,7 +74,7 @@ def sel_device(dev):
     Returns a pytorch device, includes auto option
     """
     if dev=='auto':
-        return T.device('cuda' if T.cuda.is_availabel() else 'cpu')
+        return T.device('cuda' if T.cuda.is_available() else 'cpu')
     else:
         return T.device(dev)
 

@@ -55,8 +55,6 @@ def load_dataframe(data_folder, network_names, req_cols, to_GeV=True):
         mev_cols  = [ col for col in df.columns if any( fl in col for fl in mev_flags ) ]
         df[mev_cols] /= 1000
 
-    # df = df[(df.N_Muons == 2) & (df.N_Ele == 0)]
-
     return df
 
 
@@ -170,9 +168,9 @@ def main():
 
     ## All of the variables to be binned for the x_axis
     x_list  = [
-                binned_var( 'True_ET',           15, [70, 400]    ),
-                binned_var( 'ActMu',             15, [10, 60]    ),
-                binned_var( 'Tight_Final_SumET', 15, [100, 1000] ),
+                binned_var( 'True_ET',           16, [70, 400]    ),
+                binned_var( 'ActMu',             16, [10, 60]    ),
+                binned_var( 'Tight_Final_SumET', 16, [100, 650] ),
               ]
 
     ## All of the variables to plot on the y axis these are just flags
