@@ -76,7 +76,10 @@ def main():
     net.do_proc = True
 
     # desc = 'A placeholder ONNX model converted from Pytorch, should be used for testing purposes only!'
-    desc = 'A trained MLP for missing transverse momentum reconstruction converted from Pytorch'
+    desc = (
+            'A trained MLP for missing transverse momentum reconstruction converted from Pytorch\n'
+            'printing is hard'
+    )
 
     custom_dict = {
         'author':'Matthew Leigh, University of Geneva, matthew.leigh@cern.ch',
@@ -121,7 +124,7 @@ def main():
                    opset_version=11 )                    ## Leave as 11, seems to work fine
 
     dd = onnx.load(full_name)
-    print( onnx.helper.printable_graph(dd.graph) )
+    print(onnx.helper.printable_graph(dd.graph))
 
     ## Add the dictionary to the new model
     addMetaData(full_name, desc, custom_dict, obj_dict, hyp_dict, inpt_list)
