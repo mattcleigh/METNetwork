@@ -1,7 +1,5 @@
-import time
 import h5py
 import numpy as np
-import pandas as pd
 from tqdm import tqdm
 from pathlib import Path
 from itertools import count
@@ -24,20 +22,18 @@ def buildTrainAndValid(data_dir, v_frac):
         v_frac: The fraction of files to be used for validation
     """
     ## Search the directory for HDF files
-    file_list = [f for f in Path(data_dir).glob('*.h5')]
+    file_list = np.array([f for f in Path(data_dir).glob('*.h5')])
     n_files = len(file_list)
 
     ## Exit if no files can be found
     if n_files == 0:
         raise LookupError('No HDF files could be found in ', data_dir)
-    ## Shuffle with the a set random seed
-    np.random.seed(42)
-    np.random.shuffle(file_list)
 
     ## Split the file list according to the vaid_frac (must have at least 1 train and valid!)
-    n_valid  = np.clip( int(n_files*v_frac), 1, n_files-1 )
-    valid_files = file_list[:n_valid]
-    train_files = file_list[n_valid:] ## Hacky solution to allow plotting method to use all valid
+    n_step  = np.clip(int(1/v_frac), 1, n_files-1)
+    v_mask = (np.arange(n_files)%n_step==0)
+    valid_files = file_list[v_mask]
+    train_files = file_list[~v_mask]
 
     return train_files, valid_files
 
@@ -133,36 +129,47 @@ class StreamMETDataset(IterableDataset):
         ## If it is None we are doing single process loading, worker uses whole file list
         if worker_info is None:
             worker_files = self.file_list
+            worker_samples = self.n_samples
 
         ## For multiple workers we break up the file list so they each work on a single subset
         else:
             worker_files = np.array_split(self.file_list, worker_info.num_workers)[worker_info.id]
+            worker_samples = self.n_samples // worker_info.num_workers
 
         ## Further partition the worker's file list into the ones it open at a time
         ofiles_list = myUT.chunk_given_size(worker_files, self.n_ofiles)
+        n_returned = 0
 
-        ## We iterate through the open files collection
-        for ofiles in ofiles_list:
+        ## Cycle until stop iteration criterion is met
+        while True:
 
-            ## We iterate through the chunks taken from each of the files
-            for c_count in count():
+            ## First iterate through the open files collection
+            for ofiles in ofiles_list:
 
-                ## Fill the buffer with the next set of chunks from the files
-                buffer = self.load_chunks(ofiles, c_count)
+                ## Then iterate through the chunks taken from each of the files
+                for c_count in count():
 
-                ## If the returned buffer is empty there are no more events in these files!
-                if not buffer.size:
-                    break
+                    ## Fill the buffer with the next set of chunks from the files
+                    buffer = self.load_chunks(ofiles, c_count)
 
-                ## Calculate all weights for the buffer using the final 3 variables (truth) in one go
-                weights = self.SW.apply(buffer[:, -3:]) if self.do_weights else np.ones(len(buffer))
+                    ## If the returned buffer is empty there are no more events in these files!
+                    if not buffer.size:
+                        break
 
-                ## Iterate through the samples taken from the buffer
-                for sample, weight in zip(buffer, weights):
+                    ## Calculate all weights for the buffer using the final 3 variables (truth) in one go
+                    weights = self.SW.apply(buffer[:, -3:]) if self.do_weights else np.ones(len(buffer))
 
-                    ## Yield the event if the weight is non-zero (skips the event otherwise)
-                    if weight:
-                        yield sample[:-3], sample[-2:], weight
+                    ## Iterate through the samples taken from the buffer
+                    for sample, weight in zip(buffer, weights):
+
+                        ## Yield the event if the weight is non-zero (skips the event otherwise)
+                        if weight:
+                            yield sample[:-3], sample[-2:], weight
+
+                            ## Look for potential exit condition
+                            n_returned += 1
+                            if n_returned >= worker_samples:
+                                return
 
     def load_chunks(self, files, c_count):
 
@@ -172,10 +179,9 @@ class StreamMETDataset(IterableDataset):
 
         buffer = []
         for f in files:
-            hf = h5py.File(f, 'r') ## Open the hdf file
-            chunk = hf['data/table'][start:stop][self.var_list] ## Returns np array of tuples
-            buffer += [ list(event) for event in chunk ] ## Converts into a list of lists
-            hf.close() ## Close the hdf file
+            with h5py.File(f, 'r') as hf:
+                chunk = hf['data/table'][start:stop][self.var_list] ## Returns np array of tuples
+                buffer += [ list(event) for event in chunk ] ## Converts into a list of lists
 
         ## Shuffle and return the buffer as a numpy array so it works with weighting and the dataloader's collate function
         np.random.shuffle(buffer)

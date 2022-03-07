@@ -10,6 +10,15 @@ import matplotlib.ticker as mtick
 from tqdm import tqdm
 from pathlib import Path
 
+def get_flag(proc):
+    return {
+        "WW": r"$WW \rightarrow l\nu l\nu$",
+        "ZZ": r"$ZZ \rightarrow ll \nu\nu$",
+        "HW": r"$ (VBF) H \rightarrow WW \rightarrow l\nu l\nu$",
+        "HZ": r"$(VBF) H \rightarrow ZZ \rightarrow 4\nu$",
+        "Z": r"$Z \rightarrow \mu\mu$",
+    }[proc]
+
 def finish_step(x_vals, y_vals, hbw):
 
     ## Remove hbw and add new x value
@@ -54,12 +63,7 @@ def main():
     at.monkeypatch_axis_labels()
 
     ## The input arguments
-    process = 'HZ'
-    # flag = r'$WW \rightarrow l\nu l\nu$'
-    # flag = r'$ZZ \rightarrow ll \nu\nu$'
-    # flag = r'$ (VBF) H \rightarrow WW \rightarrow l\nu l\nu$'
-    flag = r'$(VBF) H \rightarrow ZZ \rightarrow 4\nu$'
-    # flag = r'$Z \rightarrow \mu\mu$'
+    proc = 'WW'
 
     ## Some useful strings for plotting
     set = r'Tight $\Sigma p_\mathrm{T}$ [GeV]'
@@ -75,13 +79,12 @@ def main():
                 # WP('Calo_Final',   'Calo',        'darkgreen',    'd'),
                 # WP('FJVT_Final',   'FJVT',      'pink',       's'),
                 # WP('Loose_Final',  'Loose',     'cyan',      '>'),
-                WP('Tight_Final',  'Tight',       'blue',       '<'),
+                WP('Tight_Final',  'ATLAS Standard',       'blue',       '<'),
                 # WP('Tghtr_Final',  'Tigher',    'darkblue',  '^'),
                 \
-                # WP('Base',  'Normal', 'red', 'o'),
-                WP('Flat_Indep',  'RotatedMagIndep',  'brown', 'd'),
-                # WP('NoRot', 'NoRot',  'pink', 's'),
-                WP('NoRotSinkIndep', 'NoRotTargSinkIndep',  'red', 's'),
+                WP('Sampled_Mag', 'Sampled',  'red', 'd'),
+                WP('Snikhorn_Mag', 'Sinkhorn',  'brown', 's'),
+                WP('Base_Network', 'Base',  'green', '>'),
                 ]
 
     ## The variables to be binned for histogram comparisons between working points
@@ -94,11 +97,11 @@ def main():
         prof_plt( 'True_ET',           'RMSE', 'True '+etm, res, b=15, t=40),
         prof_plt( 'ActMu',             'RMSE', int, res, b=15, t=30),
         prof_plt( 'Tight_Final_SumET', 'RMSE', set, res, b=15, t=40),
-        prof_plt( 'True_ET',           'DLin', 'True '+etm, dln, b=-0.2, t=0.6, l=70, r=400 )
+        prof_plt( 'True_ET',           'DLin', 'True '+etm, dln, b=-0.2, t=0.6, l=0, r=400 )
               ]
 
     ## Open the input files
-    folder = '../../Output/' + process
+    folder = '../../Output/' + proc
     file_name =  folder + '/hists.h5'
     store = pd.HDFStore(file_name)
 
@@ -131,7 +134,7 @@ def main():
         if h.yname == 'DLin':
             ax.axhline(0, color='k')
 
-        at.atlasify('Simulation', 'Internal\n' '$\sqrt{s}=13$ TeV\n' + flag)
+        at.atlasify('Simulation', 'Internal\n' '$\sqrt{s}=13$ TeV\n' + get_flag(proc))
         legend = ax.legend(loc='upper right', fontsize=12)
         legend.get_frame().set_alpha(1)
         legend.get_frame().set_color('white')
@@ -154,9 +157,9 @@ def main():
             ax.set_xlabel(h.xlabel)
             ax.set_ylabel(h.ylabel)
             fig.tight_layout()
+        ax.yaxis.label.set_size(15)
+        ax.xaxis.label.set_size(15)
         fig.savefig( Path(folder, h.key+'.png') )
-
-    # plt.show()
 
 if __name__ == '__main__':
     main()

@@ -24,7 +24,7 @@ class SampleWeight:
         hist_file: A csv containing the distribution histogram with which to perform the weighting
         w_to:  The maximum point in the histogram to apply the weights (flatten up to a point)
                Must be greater than zero!
-        w_rat: Defines the threshold between the downsampling weights and the loss weights
+        w_rat: Defines the threshold between the downsampling weights and the loss weights (v rndm vs loss ^)
         w_shf: A gradient of a linear shift applied to all weights
 
     """
@@ -32,6 +32,7 @@ class SampleWeight:
 
         ## Get weights from the 2D histogram or targets
         if w_tp == 'trg':
+            w_to = min(w_to, 3) ## w_to shouldnt be bigger than three for target space
             source = np.loadtxt(Path(folder, 'TrgDist.csv'))
             mid_x = source[0]
             mid_y = source[1]
@@ -60,10 +61,10 @@ class SampleWeight:
         ## Calculate the weights for each bin, clipping at the maximum
         weights = np.clip(1.0 / hist, None, max_weight)
 
-        ## For magnitude scaling, dont provide massive weights to the first two of bins!
+        ## For magnitude scaling, dont provide massive weights to the first couple of bins!
         ## This is a hack solution to fix some errors we are getting for not scaling up the histogram correctly
         if w_tp == 'mag':
-            weights[:2] = weights[2]
+            weights[:5] = weights[5]
 
         ## Prevent the magnitude weights from disapearing at zero when using trg
         if w_tp == 'trg':
@@ -74,7 +75,7 @@ class SampleWeight:
             mask = (mid_r < r)
             weights[mask] = val
 
-        # ## Modify the weights using a linear shift or a bias function
+        ## Modify the weights using a linear shift or a bias function
         if w_shf != 0:
             # weights = BiasFunction(weights, np.max(weights), w_shf) ## Doesnt really work with sliced samples...
             m = w_shf / w_to ## Calculate a gradient corresponding to inputs between -1 and 1, preventing any negative weights!
@@ -124,7 +125,7 @@ class SampleWeight:
             weights = self.f(true_mag).astype(np.float32)
 
         ## Apply the downsampling if required
-        if self.thresh:
+        if self.thresh > 0:
 
             ## Get the weight divided by the threshold
             wd = weights / self.thresh

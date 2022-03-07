@@ -1,0 +1,110 @@
+A metadata file for:
+-> Network_B_v0.onnx : A trained MLP for missing transverse momentum reconstruction converted from Pytorch
+This network was trained on raw inputs using the ATLAS reference frame, no rotational pre-processing
+The training set was sampled in such a way so that the 2D True MET x,y distribution was approximately flat up to 300 GeV
+An additional distribution matching Sinkhorn loss was added to each batch during training to reduce bias at the cost of some resolution
+Only the independant subset of variables produced by the METNet tool are passed to the network 
+
+author : Matthew Leigh, University of Geneva, matthew.leigh@cern.ch
+date : 13/10/21
+trained_at : Unversity of Geneva High Performance Computing Center (Baobab)
+training_set : mc16_13TeV.410470.PhPy8EG_A14_ttbar_hdamp258p75_nonallhad.deriv.DAOD_PHYS.e6337_s3126_r10724_p4355
+AthenaRelease : AthAnalysis 21.2.170
+PytorchVersion : 1.9.0+cu111
+OnnxVersion : 1.10.1
+
+The following (baseline) object selections were used to derive the inputs for training.
+It is highly advised that you stick to these configurations:
+Ele.Pt : 10 GeV
+Ele.Eta : 2.47
+Ele.Id : LooseAndBLayerLLH
+Ele.CrackVeto : False
+Ele.z0 : 0.5
+Muon.Pt : 10 GeV
+Muon.Eta : 2.7
+Muon.Id : Medium
+Muon.z0 : 0.5
+Photon.Pt : 25 GeV
+Photon.Eta : 2.37
+Photon.Id : Tight
+Jet.Pt : 20 GeV
+
+The network was configured and trained using the following hyper-parameters.
+name : 49484133_5_18_08_21
+save_dir : /mnt/scratch/Saved_Networks/Presentation/
+do_rot : True
+inpt_rmv : Final,_ET
+act : silu
+depth : 5
+width : 512
+nrm : True
+drpt : 0.0
+dev : auto
+v_frac : 0.1
+n_ofiles : 32
+chnk_size : 2048
+b_size : 1024
+n_workers : 3
+weight_type : mag
+weight_to : 3.6
+weight_ratio : 0.0
+weight_shift : 0.0
+n_train_files : 2968
+n_valid_files : 329
+train_size : 233539306
+valid_size : 26592163
+opt_nm : adam
+lr : 5e-05
+patience : 5
+reg_loss_nm : hbloss
+dst_loss_nm : engmmd
+dst_weight : 0.0
+grad_clip : 0.0
+do_dst : False
+num_epochs : 8
+avg_res : 25.28247833251953
+
+The network uses only the following variables produced by the METNet tool.
+Tight_Sig
+Loose_Sig
+Tghtr_Sig
+FJVT_Sig
+Calo_Sig
+Tight_RefJet_EX
+Tight_RefJet_EY
+Tight_RefJet_SumET
+Loose_RefJet_EX
+Loose_RefJet_EY
+Loose_RefJet_SumET
+Tghtr_RefJet_EX
+Tghtr_RefJet_EY
+Tghtr_RefJet_SumET
+FJVT_RefJet_EX
+FJVT_RefJet_EY
+FJVT_RefJet_SumET
+Tight_Muons_EX
+Tight_Muons_EY
+Tight_Muons_SumET
+Tight_RefEle_EX
+Tight_RefEle_EY
+Tight_RefEle_SumET
+Tight_RefGamma_EX
+Tight_RefGamma_EY
+Tight_RefGamma_SumET
+Loose_PVSoftTrk_EX
+Loose_PVSoftTrk_EY
+Loose_PVSoftTrk_SumET
+Calo_SoftClus_EX
+Calo_SoftClus_EY
+Calo_SoftClus_SumET
+ActMu
+NVx_2Tracks
+NVx_4Tracks
+PV_NTracks
+N_Muons
+N_Ele
+N_Gamma
+N_Jets
+N_FWD_Jets
+SumET_FWD_Jets
+Sum_JetPU

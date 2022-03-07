@@ -53,6 +53,7 @@ def get_loss(name, **kwargs):
 
 def get_opt(name, params, lr, **kwargs):
     if   name == 'adam': return optim.Adam(params, lr=lr, **kwargs)
+    elif name == 'adamw': return optim.AdamW(params, lr=lr, **kwargs, weight_decay=1e-4, betas=(0.1, 0.999))
     elif name == 'rmsp': return optim.RMSprop(params, lr=lr, **kwargs)
     elif name == 'sgd':  return optim.SGD(params, lr=lr, **kwargs)
     else:

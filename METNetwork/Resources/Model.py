@@ -10,11 +10,14 @@ import torch as T
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+from functools import partialmethod
 
 import METNetwork.Resources.Utils as myUT
 import METNetwork.Resources.Networks as myNW
 import METNetwork.Resources.Plotting as myPL
 import METNetwork.Resources.Datasets as myDS
+
+from METNetwork.Resources.cossanwu import CosineAnnealingWarmupRestarts
 
 class METNET_Agent:
     def __init__(self, name, save_dir):
@@ -65,7 +68,7 @@ class METNET_Agent:
         if no_trn:
             train_files = train_files[:1]
         train_set = myDS.StreamMETDataset(train_files, *dataset_args, weight_ratio)
-        valid_set = myDS.StreamMETDataset(valid_files, *dataset_args, 0.0) ## Validation never uses sampling (too noisy)
+        valid_set = myDS.StreamMETDataset(valid_files, *dataset_args, weight_ratio)
 
         ## Create the pytorch dataloaders (works for both types of datset)
         loader_kwargs = {'batch_size':b_size, 'num_workers':n_workers, 'drop_last':True, 'pin_memory':True}
@@ -81,7 +84,7 @@ class METNET_Agent:
         print('train set: {:4} files containing {} samples'.format(self.n_train_files, self.train_size))
         print('valid set: {:4} files containing {} samples'.format(self.n_valid_files, self.valid_size))
 
-    def setup_training(self, opt_nm, lr, patience, reg_loss_nm, dst_loss_nm, dst_weight, grad_clip):
+    def setup_training(self, opt_nm, lr, patience, reg_loss_nm, dst_loss_nm, dst_weight, grad_clip, do_shd):
         '''
         Sets up variables used for training, including the optimiser
         '''
@@ -99,6 +102,12 @@ class METNET_Agent:
         ## Initialise the optimiser
         self.opt = myUT.get_opt(opt_nm, self.net.parameters(), lr)
 
+        ## Set the learning rate scheduler manually
+        if do_shd:
+            self.shd = CosineAnnealingWarmupRestarts(self.opt, len(self.train_loader), max_lr=lr)
+        else:
+            self.shd = None
+
         ## The history of the losses and their plots
         loss_names = ['tot_loss', 'reg_loss', 'dst_loss']
         self.loss_hist = {lnm:{set:[] for set in ['train', 'valid']} for lnm in loss_names }
@@ -107,6 +116,12 @@ class METNET_Agent:
         self.num_epochs = 0
         self.best_epoch = 0
         self.bad_epochs = 0
+
+        ## Turning off tqdm
+        tqdm_quiet = True
+        if tqdm_quiet:
+            print(" - disabling tqdm outputs")
+            tqdm.__init__ = partialmethod(tqdm.__init__, disable=True)
 
     def run_training_loop(self):
         '''
@@ -160,7 +175,8 @@ class METNET_Agent:
         loader.dataset.weight_on()
         loader.dataset.shuffle_files()
 
-        for batch in tqdm(loader, desc=set, ncols=80, ascii=True):
+        ## Enumerate through the data loader
+        for b, batch in enumerate(tqdm(loader, desc=set, ncols=80, ascii=True)):
 
             ## Zero out the gradients
             if is_train:
@@ -181,11 +197,21 @@ class METNET_Agent:
             ## Combine the losses
             tot_loss = reg_loss + self.dst_weight * dst_loss
 
-            ## Calculate the gradients and update the parameters
             if is_train:
+
+                ## Calculate the gradients
                 tot_loss.backward()
-                if self.grad_clip: nn.utils.clip_grad_norm_(self.net.parameters(), self.grad_clip)
+
+                ## Apply gradient clipping
+                if self.grad_clip:
+                    nn.utils.clip_grad_norm_(self.net.parameters(), self.grad_clip)
+
+                ## Step the optimiser
                 self.opt.step()
+
+                ## Step the scheduler
+                if self.do_shd:
+                    self.shd.step(b)
 
             ## Update the each of the running losses
             losses = {'tot_loss':tot_loss, 'reg_loss':reg_loss, 'dst_loss':dst_loss}
@@ -217,9 +243,9 @@ class METNET_Agent:
         T.save(self.net.state_dict(), Path(model_folder, 'net_latest'))
         T.save(self.opt.state_dict(), Path(model_folder, 'opt_latest'))
 
-        ## For our best network we save the entire model, not just the state dict!!!
-        if self.bad_epochs==0:
-            T.save(self.net, Path(model_folder, 'net_best'))
+        ## Save the entire model not just the state dict per checkpoint!!!
+        T.save(self.net, Path(model_folder, f'net_{self.num_epochs}'))
+        T.save(self.net, Path(model_folder, 'net_best'))
 
         ## Save a file containing the network setup and description (based on get_gict() )
         with open(Path(full_name, 'info.txt'), 'w') as f:
@@ -232,9 +258,8 @@ class METNET_Agent:
         ## Save a plot of the loss history
         myPL.plot_multi_loss(Path(full_name, 'losses'), self.loss_hist)
 
-        ## If the network is the best, then we also save the performance file
-        if self.bad_epochs==0:
-            self.save_perf()
+        ## Save a new performance file for each network
+        self.save_perf()
 
     def load(self, dict_only=False):
 
@@ -260,6 +285,8 @@ class METNET_Agent:
             - Deviation from linearity
             - Angular Resolution
 
+        XXX.png: The above profiles also saved as images
+
         XXXDist.png: Histograms and contours containing
             - 1D distributions of the reconstructed and true et (post-processed)
             - 2D distributions of the reconstructed and true x,y (raw and post-processed)
@@ -270,11 +297,14 @@ class METNET_Agent:
         print()
         print('Running performance profiles')
 
+        out_path = Path(self.save_dir, self.name, f'perf_{self.num_epochs}')
+        out_path.mkdir(parents=True, exist_ok=True)
+
         ## The bin setup to use for the profiles
         n_bins = 40
         mag_bins = np.linspace(0, 400, n_bins+1)
-        trg_bins = [ np.linspace(-3, 5, n_bins+1), np.linspace(-4, 4, n_bins+1) ]
-        exy_bins = [ np.linspace(-50, 250, n_bins+1), np.linspace(-150, 150, n_bins+1) ]
+        trg_bins = [ np.linspace(-4, 4, n_bins+1)+self.do_rot, np.linspace(-4, 4, n_bins+1) ]
+        exy_bins = [ np.linspace(-150, 150, n_bins+1)+self.do_rot*100, np.linspace(-150, 150, n_bins+1) ]
 
         ## All the networks outputs and targets for the batch will be combined into one list
         all_outputs = []
@@ -313,7 +343,7 @@ class METNET_Agent:
         lin = (net_et - tru_et) / (tru_et + 1e-8)
         ang = T.acos( T.sum(net_xy*tru_xy, dim=1) / (net_et*tru_et+1e-8) )**2 ## Calculated using the dot product
 
-        ## We save the overall resolution
+        ## Save the overall resolution
         self.avg_res = T.sqrt(res.mean()).item()
 
         ## Combine the performance metrics into a single pandas dataframe
@@ -327,12 +357,23 @@ class METNET_Agent:
         profs['Ang'] = np.sqrt(profs['Ang'])
 
         ## Save the performance profiles
-        profs.to_csv(Path(self.save_dir, self.name, 'perf.csv'), index=False)
+        profs.to_csv(Path(out_path, 'perf.csv'), index=False)
+
+        ## Save the profiles as images
+        lims = [[0, 50], [-0.2, 0.5], [0, 2.5]]
+        for prof_nm, ylim in zip(met_names[1:], lims):
+            fig, ax = plt.subplots()
+            ax.plot(profs['TruM'], profs[prof_nm])
+            ax.set_xlabel('TruM')
+            ax.set_ylabel(prof_nm)
+            ax.set_ylim(ylim)
+            ax.grid()
+            fig.savefig(Path(out_path, f'{prof_nm}.png'))
 
         ## Save the Magnitude histograms
         h_tru_et = np.histogram(myUT.to_np(tru_et), mag_bins, density=True)[0]
         h_net_et = np.histogram(myUT.to_np(net_et), mag_bins, density=True)[0]
-        myPL.plot_and_save_hists( Path(self.save_dir, self.name, 'MagDist'),
+        myPL.plot_and_save_hists( Path(out_path, 'MagDist'),
                                   [h_tru_et, h_net_et],
                                   ['Truth', 'Outputs'],
                                   ['MET Magnitude [Gev]', 'Normalised'],
@@ -342,7 +383,7 @@ class METNET_Agent:
         ## Save the target contour plots
         h_tru_tg = np.histogram2d(*myUT.to_np(all_targets).T, trg_bins, density=True)[0]
         h_net_tg = np.histogram2d(*myUT.to_np(all_outputs).T, trg_bins, density=True)[0]
-        myPL.plot_and_save_contours( Path(self.save_dir, self.name, 'TrgDist'),
+        myPL.plot_and_save_contours( Path(out_path, 'TrgDist'),
                                      [h_tru_tg, h_net_tg],
                                      ['Truth', 'Outputs'],
                                      ['scaled x', 'scaled y'],
@@ -352,7 +393,7 @@ class METNET_Agent:
         ## Save the ex and ey contour plots
         h_tru_xy = np.histogram2d(*myUT.to_np(tru_xy).T, exy_bins, density=True)[0]
         h_net_xy = np.histogram2d(*myUT.to_np(net_xy).T, exy_bins, density=True)[0]
-        myPL.plot_and_save_contours( Path(self.save_dir, self.name, 'ExyDist'),
+        myPL.plot_and_save_contours( Path(out_path, 'ExyDist'),
                                      [h_tru_xy, h_net_xy],
                                      ['Truth', 'Outputs'],
                                      ['METx [GeV]', 'METy [GeV]'],

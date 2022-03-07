@@ -25,6 +25,8 @@ def load_dataframe(data_folder, network_names, req_cols, to_GeV=True):
 
     ## Load the input files and sort
     inpt_files = glob.glob( data_folder + '*.train-sample.csv' )
+    if "Zmumu" in data_folder:
+        inpt_files = list(filter(lambda s: "00.t" in s, inpt_files))
     inpt_files.sort()
 
     ## Load the list of each network file
@@ -127,15 +129,15 @@ def save_profiles(df, x_list, y_list, wp_list, out_hdf):
 
 def main():
 
-    network_names = ['Flat_Indep', 'NoRotSinkIndep']
+    network_names = ["Sampled_Mag", "Sikhorn_Mag", "Base_Network"]
 
     data_base_dir = '/mnt/scratch/Data/METData/Test/'
 
     processes = [
-                  # ('Z',  'user.mleigh.07_07_21.SET.Zmumu_361107_EXT0/'),
-                  # ('WW', 'user.mleigh.07_07_21.SET.WW_361600_EXT0/'),
-                  # ('ZZ', 'user.mleigh.07_07_21.SET.ZZ_361604_EXT0/'),
-                  # ('HW', 'user.mleigh.07_07_21.SET.HW_345948_EXT0/'),
+                #   ('Z',  'user.mleigh.07_07_21.SET.Zmumu_361107_EXT0/'),
+                  ('WW', 'user.mleigh.07_07_21.SET.WW_361600_EXT0/'),
+                  ('ZZ', 'user.mleigh.07_07_21.SET.ZZ_361604_EXT0/'),
+                  ('HW', 'user.mleigh.07_07_21.SET.HW_345948_EXT0/'),
                   ('HZ', 'user.mleigh.07_07_21.SET.HZ_346600_EXT0/'),
                 ]
 
@@ -144,7 +146,7 @@ def main():
                  # 'Tghtr_Final_ET', 'Tghtr_Final_EX', 'Tghtr_Final_EY',
                  # 'FJVT_Final_ET',  'FJVT_Final_EX',  'FJVT_Final_EY',
                  # 'Calo_Final_ET',  'Calo_Final_EX',  'Calo_Final_EY',
-                 # 'Track_Final_ET', 'Track_Final_EX', 'Track_Final_EY',
+                #  'Track_Final_ET', 'Track_Final_EX', 'Track_Final_EY',
                  'True_ET', 'True_EX', 'True_EY',
                  'ActMu' ]
 
@@ -168,7 +170,7 @@ def main():
 
     ## All of the variables to be binned for the x_axis
     x_list  = [
-                binned_var( 'True_ET',           16, [70, 400]    ),
+                binned_var( 'True_ET',           16, [0, 400]    ),
                 binned_var( 'ActMu',             16, [10, 60]    ),
                 binned_var( 'Tight_Final_SumET', 16, [100, 650] ),
               ]
@@ -193,7 +195,7 @@ def main():
 
         ## Make the histograms
         df = load_dataframe(data_folder, network_names, req_cols) ## Load in all of the information
-        save_histograms(df, h_list, wp_list, out_hdf )          ## Save all the 1 dimensional histograms
+        save_histograms(df, h_list, wp_list, out_hdf )           ## Save all the 1 dimensional histograms
         add_binned_columns(df, x_list)                           ## Add columns showing binned information for the x values
         add_metric_columns(df, y_list, wp_list)                  ## Add columns showing the metrics for the y values
         save_profiles(df, x_list, y_list, wp_list, out_hdf )     ## Save all the 2 dimentional profiles

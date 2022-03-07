@@ -1,105 +1,101 @@
-import glob
-import scipy.stats
 import numpy as np
 import pandas as pd
-
+import time
+from glob import glob
 from tqdm import tqdm
 from pathlib import Path
 
 import torch as T
-import torch.nn as nn
 
-import METNetwork.Resources.Utils as myUT
+from mattstools.torch_utils import sel_device, to_np, move_dev
+
+T.manual_seed(42)
+
 
 def main():
 
-    with T.no_grad():
+    ## To run over the GPU and the batch size for evaluation
+    do_gpu = False
+    b_size = 10000
 
-        ## The main directory to load the data from
-        data_folder = '/mnt/scratch/Data/METData/Test/*/'
+    ## The main directory to load the data from
+    data_folder = "/mnt/scratch/Data/METData/Test/"
 
-        ## A list of the network names and the name of the csv file to add to the datafiles
-        network_folder = '/mnt/scratch/Saved_Networks/'
-        file_suffix = 'models/net_best'
-        network_names = [
-                          # ('Presentation_Inputs/49506423_0_20_08_21', 'No_Calo'),
-                          # ('Presentation_Inputs/49506484_1_20_08_21', 'No_Track'),
-                          # ('Presentation_Inputs/49500187_2_20_08_21', 'No_FJVT'),
-                          # /
-                          # ('Presentation/49484120_0_18_08_21', 'Base'),
-                          # ('Presentation/49484124_1_18_08_21', 'Base_Indep'),
-                          # ('Presentation/49484127_4_18_08_21', 'Flat'),
-                          # ('Presentation/49484133_5_18_08_21', 'Flat_Indep'),
-                          # ('Presentation/49496261_4_19_08_21', 'NoRot'),
-                          # ('Presentation/49496958_5_19_08_21', 'NoRot_Indep'),
-                          # /
-                          # ('Presentation_Sampled/49504908_2_20_08_21', 'Dist_Indep'),
-                          ('Samples/49525803_0_23_08_21', 'NoRotSinkIndep'),
+    ## A list of the network names and the name of the csv file to add to the datafiles
+    network_folder = "/mnt/scratch/Saved_Networks/"
+    file_name = "models/net_best"
+    network_names = [
+        ("QTPres/53096564_0_15_12_21", "Sampled_Mag"),
+        ("QTPres/53014519_0_13_12_21", "Sinkhorn_Mag"),
+        ("QTPres/53014390_0_13_12_21", "Base_Network"),
+    ]
 
-                          ]
+    ## Define the device to work on and set pytorch to not track gradients
+    device = sel_device("cpu")
+    T.set_grad_enabled(False)
 
-        ## Load the list of input data filesfiles
-        all_files = glob.glob(data_folder + '*.train-sample.csv')
-        if not all_files:
-            raise ValueError('No input files found')
+    ## Load the list of input data files
+    all_files = glob(data_folder + "*/*.train-sample.csv")
 
-        ## Dont do Zmumu for now
-        all_files = [x for x in all_files if 'Zmumu' not in x]
+    if not all_files:
+        raise ValueError("No input files found")
 
-        ## Cycle through the requested networks
-        for network_file, network_name in network_names:
+    ## Ignore ttbar and Zmumu for now (too large)
+    all_files = [x for x in all_files if "Zmumu" not in x and "ttbar" not in x]
+    all_files = [x for x in all_files if "0.train-sample.csv" in x]
 
-            ## Load the network
-            net = T.load(Path(network_folder, network_file, file_suffix))
+    ## Cycle through the requested networks
+    for network_file, network_name in network_names:
+        print(network_name)
 
-            ## Configure the network for full pass evaluation
-            net.to('cuda')
-            net.eval()
-            net.do_proc = True
+        ## Load the network and configure for full pass evaluation
+        net = T.load(Path(network_folder, network_file, file_name), map_location=device)
+        net.device = device
+        net.do_proc = True
+        net.eval()
 
-            ## Load the input files
-            b_size = 10000
+        ## Cycle through the input all input files
+        for file in tqdm(all_files):
 
-            ## Cycle through the input files
-            for i, file in enumerate(all_files):
-                print('{:.2f}%'.format(100*i/len(all_files)),  file)
+            ## Register the buffers
+            net_et = []
+            net_ex = []
+            net_ey = []
 
-                ## Register the buffers
-                net_et = []
-                net_ex = []
-                net_ey = []
+            ## Iterate through the buffers using pandas chunk
+            batch_reader = pd.read_csv(file, chunksize=b_size, dtype=np.float32)
+            for batch in tqdm(batch_reader, leave=False):
 
-                ## Cycle through the batches
-                # for batch in pd.read_csv(file, chunksize=b_size, dtype=np.float32):
+                ## Load the batch inputs, convert to torch and pass through net
+                ## Ignore final four values: True_ET, EX, EY and DSID
+                net_out = net(move_dev(T.from_numpy(batch.to_numpy()[:, :-4]), device))
 
-                try:
-                    batch = pd.read_csv(file, dtype=np.float32)
-                except:
-                    print("FAILED\n")
-                    continue
+                ## Add the outputs to the buffers
+                net_et.append(T.linalg.norm(net_out, axis=1))
+                net_ex.append(net_out[:, 0])
+                net_ey.append(net_out[:, 1])
 
-                ## Get the network output for the batch (the final values in the csv are the True_ET, EX, EY and DSID)
-                net_inp = T.from_numpy(batch.to_numpy()[:, :-4]).to('cuda')
-                net_out = net(net_inp)
+            ## Combine the buffers of the entire file
+            net_et = to_np(T.cat(net_et, axis=0))
+            net_ex = to_np(T.cat(net_ex, axis=0))
+            net_ey = to_np(T.cat(net_ey, axis=0))
 
-                ## Fill in the buffers
-                net_et.append( T.linalg.norm(net_out, axis=1).cpu() )
-                net_ex.append( net_out[:, 0].cpu() )
-                net_ey.append( net_out[:, 1].cpu() )
+            # ## Convert to a dataframe
+            net_df = pd.DataFrame(
+                {
+                    network_name + "_ET": net_et,
+                    network_name + "_EX": net_ex,
+                    network_name + "_EY": net_ey,
+                }
+            )
 
-                ## Combine the buffers into numpy arrays
-                net_et = np.concatenate( net_et, axis = 0 )
-                net_ex = np.concatenate( net_ex, axis = 0 )
-                net_ey = np.concatenate( net_ey, axis = 0 )
+            # ## Save the dataframe
+            # file_path = Path(file)
+            # output_path = Path(
+            #     file_path.parent, str(file_path.stem) + "_" + network_name + ".csv"
+            # )
+            # net_df.to_csv(output_path, index=False)
 
-                net_df = pd.DataFrame( { network_name+'_ET': net_et,
-                                         network_name+'_EX': net_ex,
-                                         network_name+'_EY': net_ey } )
 
-                ## Save the dataframe
-                file_path = Path(file)
-                output_path = Path(file_path.parent, str(file_path.stem) + '_' + network_name + '.csv')
-                net_df.to_csv(output_path, index=False)
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

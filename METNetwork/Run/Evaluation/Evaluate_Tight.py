@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+from copy import deepcopy
 import matplotlib.pyplot as plt
 
 from tqdm import tqdm
@@ -18,19 +19,18 @@ cmap = plt.get_cmap("turbo")
 
 def main():
 
-    inpt_folder =  "/mnt/scratch/Data/METData/"
+    inpt_folder = "/mnt/scratch/Data/METData/"
     v_frac = 0.1
 
     ## Create a dummy model as it has all of the loader capabilities and ensure this is exactly what our networks see during training!
     model = Model.METNET_Agent('Tight', '/mnt/scratch/Saved_Networks/Presentation/')
     model.setup_network(True, 'XXX', None, 1, 5, False, 0, dev='cpu')
     model.inpt_list = ['Tight_Final_ET']
-    model.setup_dataset(inpt_folder, v_frac, 8, 4096, 4096, 4, 0, 0, 0, 0)
+    model.setup_dataset(inpt_folder, v_frac, 32, 1024, 8096, 8, 'mag', 0, 0, 0, no_trn=True)
 
     ## The bin setup to use for the profiles
     n_bins = 40
     mag_bins = np.linspace(0, 400, n_bins+1)
-    trg_bins = [ np.linspace(-3, 5, n_bins+1), np.linspace(-4, 4, n_bins+1) ]
     exy_bins = [ np.linspace(-50, 250, n_bins+1), np.linspace(-150, 150, n_bins+1) ]
 
     ## All the networks outputs and targets for the batch will be combined into one list
@@ -55,8 +55,8 @@ def main():
         tight = (tight * model.net.inp_stats[1, :1] + model.net.inp_stats[0, :1]) / 1000
         outputs = T.cat([tight, T.zeros_like(tight)], dim=1)
 
-        all_outputs.append(outputs)
-        all_targets.append(targets)
+        all_outputs.append(deepcopy(outputs))
+        all_targets.append(deepcopy(targets))
 
     ## Combine the lists into single tensors
     all_outputs = T.cat(all_outputs)

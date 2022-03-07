@@ -1,27 +1,28 @@
 python Train.py \
-  --name      NoRotIndepWeighted \
-  --save_dir  ../../../../Saved_Networks/tmp/ \
-  --data_dir  ../../../../Data/METData/ \
-  --do_rot    False \
+  --name      test \
+  --save_dir  /mnt/scratch/Saved_Networks/tmp/ \
+  --data_dir  /mnt/scratch/Data/METData/ \
+  --do_rot    True \
   --inpt_rmv  Final,_ET \
-  --v_frac    0.2 \
+  --v_frac    0.1 \
   --n_ofiles  32 \
-  --chnk_size 1024 \
-  --b_size    1024 \
+  --chnk_size 2048 \
+  --b_size    2048 \
   --n_workers 4 \
-  --weight_type trg \
+  --weight_type mag \
   --weight_to  3 \
   --weight_shift 0.0 \
   --weight_ratio 1.0 \
   --act       silu \
-  --depth     10 \
-  --width     128 \
+  --depth     5 \
+  --width     512 \
   --nrm       True \
   --drpt      0.0 \
-  --opt_nm    adam \
-  --lr        1e-4 \
+  --opt_nm    adamw \
+  --lr        1e-5 \
   --patience  25 \
   --reg_loss_nm hbloss \
-  --dst_loss_nm snkhrn \
+  --dst_loss_nm engmmd \
   --dst_weight 1 \
   --grad_clip 0 \
+  --do_shd True \

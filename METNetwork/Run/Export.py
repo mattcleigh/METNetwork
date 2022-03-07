@@ -1,18 +1,14 @@
 import onnx
-import json
 import numpy as np
-import pandas as pd
-import onnxruntime as rt
 
-from datetime import date
 from pathlib import Path
+from datetime import date
 
 import torch as T
 import torch.nn as nn
 
 from METNetwork.Resources import Model
 import METNetwork.Resources.Utils as myUT
-import METNetwork.Resources.Networks as myNW
 
 class DummyNet(nn.Module):
     def __init__(self, inp, out):
@@ -62,28 +58,36 @@ def main():
     ## The input and output file names
     net_folder = '/mnt/scratch/Saved_Networks/Presentation'
     net_name = '49484133_5_18_08_21'
-    output_name = 'RotatedMagIndep_v0.onnx'
+    output_name = 'Network_B_v0.onnx'
 
     ## Load the trained network and the model for its dictionary
     model = Model.METNET_Agent(net_name, net_folder)
     model.load(dict_only=True)
     net = T.load(Path(net_folder, net_name, 'models/net_best'))
     print(net)
-    
+
     ## Configure the network for full pass evaluation
     net.to('cpu')
     net.eval()
     net.do_proc = True
 
     # desc = 'A placeholder ONNX model converted from Pytorch, should be used for testing purposes only!'
+    # desc = (
+    #         'A trained MLP for missing transverse momentum reconstruction converted from Pytorch\n'
+    #         'This network was trained on inputs rotated such that the Tight working point estimate lay on the x-axis\n'
+    #         'The training set was sampled in such a way so that the 1D True MET magnitude distribution was approximately flat up to 350 GeV\n'
+    #         'Only the independant subset of variables produced by the METNet tool are passed to the network'
+    # )
     desc = (
             'A trained MLP for missing transverse momentum reconstruction converted from Pytorch\n'
-            'printing is hard'
+            'This network was trained on raw inputs using the ATLAS reference frame, no rotational pre-processing\n'
+            'The training set was sampled in such a way so that the 2D True MET x,y distribution was approximately flat up to 300 GeV\n'
+            'Only the independant subset of variables produced by the METNet tool are passed to the network'
     )
 
     custom_dict = {
         'author':'Matthew Leigh, University of Geneva, matthew.leigh@cern.ch',
-        'date': date.today().strftime("%d/%m/%y"),
+        'date': date.today().strftime('%d/%m/%y'),
         'trained_at':'Unversity of Geneva High Performance Computing Center (Baobab)',
         'training_set':'mc16_13TeV.410470.PhPy8EG_A14_ttbar_hdamp258p75_nonallhad.deriv.DAOD_PHYS.e6337_s3126_r10724_p4355',
         'AthenaRelease':'AthAnalysis 21.2.170',
