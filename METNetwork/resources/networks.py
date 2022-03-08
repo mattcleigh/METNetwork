@@ -166,10 +166,7 @@ class METNet(MyNetBase):
 
         """
         ## Only run over 10% of the samples! Must set this back after
-        all_samples = len(loader.dataset)
-        n_samples = all_samples // 10
-        loader.dataset.n_samples = n_samples
-        print(f"Running performance profiles on {n_samples} samples")
+        print(f"Running performance profiles on {loader.dataset.n_samples} samples")
 
         ## Create the subfolder
         out_path = Path(path, f"perf_{flag}")
@@ -177,7 +174,7 @@ class METNet(MyNetBase):
 
         ## The bin setup to use for the profiles
         n_bins = 50
-        mag_bins = np.linspace(0, 400, n_bins + 1)
+        mag_bins = np.linspace(0, 450, n_bins + 1)
         trg_bins = [
             np.linspace(-4, 4, n_bins + 1) + self.do_rot,
             np.linspace(-4, 4, n_bins + 1)
@@ -250,6 +247,7 @@ class METNet(MyNetBase):
             ax.set_ylim(ylim)
             ax.grid()
             fig.savefig(Path(out_path, f"{prof_nm}.png"))
+            plt.close(fig)
 
         ## Save the Magnitude histograms
         h_tru_et = np.histogram(to_np(tru_et), mag_bins, density=True)[0]
@@ -287,6 +285,5 @@ class METNet(MyNetBase):
             do_csv=True,
         )
 
-        ## Make sure the dataset's weight function is enabled and turn on all samples
+        ## Make sure the dataset's weight function is reenabled
         loader.dataset.weight_on()
-        loader.dataset.n_samples = all_samples

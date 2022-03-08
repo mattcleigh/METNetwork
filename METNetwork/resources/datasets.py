@@ -14,6 +14,9 @@ from METNetwork.resources.sampler import Sampler
 
 from mattstools.utils import chunk_given_size
 
+## The size of the HDF chunks prepared by create_HDF.py
+CHUNK_SIZE = 399
+
 
 def create_input_list(inpt_rmv: str, do_rot: bool) -> list:
     """Return a list of inputs to use in the network
@@ -89,7 +92,8 @@ class StreamMETDataset(IterableDataset):
         do_rot: bool = "False",
         inpts_rmv: str = "xxx",
         n_ofiles: int = 64,
-        chunk_size: int = 4096,
+        chunk_size: int = CHUNK_SIZE * 10,
+        chunks_per_file: int = 0,
         sampler_kwargs: dict = None,
     ):
         """
@@ -101,6 +105,8 @@ class StreamMETDataset(IterableDataset):
             n_ofiles:  Nnumber of files to read from simultaneously
                        larger = more memory but better shuffling
             chunk_size: The size of the chunk to read from each of the ofiles
+            chunks_per_file: The number of chunks to load from each file
+                - 0 = all and is what should be used to train full models
             sampler_kwargs: Keyword arguments for the weighted sampler
         """
         super().__init__()
@@ -108,7 +114,7 @@ class StreamMETDataset(IterableDataset):
         print(f"\nCreating dataset: {dset}")
 
         ## Check dset type
-        if dset not in ["all", "train", "val", "mini"]:
+        if dset not in ["train", "val"]:
             raise ValueError(f"Unrecognized dset: {dset}")
 
         ## Default dict
@@ -117,7 +123,7 @@ class StreamMETDataset(IterableDataset):
         ## Class attributes
         self.do_rot = do_rot
         self.n_ofiles = n_ofiles
-        self.chunk_size = chunk_size
+
         self.weight_exist = sampler_kwargs["weight_to"] > 0  ## Kept constant
         self.do_weights = self.weight_exist  ##  Can be toggled on and off
 
@@ -129,15 +135,6 @@ class StreamMETDataset(IterableDataset):
         self.path = Path(path, "Rotated" if do_rot else "Raw")
         self.f_list = list(self.path.glob("*.h5"))
 
-        ## If using either val or train, as files with ending with 0 are for val
-        if dset == "train":
-            self.f_list = [f for f in self.f_list if "0.h5" not in str(f)]
-        elif dset == "val":
-            self.f_list = [f for f in self.f_list if "0.h5" in str(f)]
-        elif dset == "mini":
-            print("SHORTENING THE FILE LIST DO NOT TRAIN ON THIS")
-            self.f_list = self.f_list[:50]
-
         ## Exit if no files can be found
         if not self.f_list:
             raise LookupError("No HDF files could be found in ", path)
@@ -146,11 +143,28 @@ class StreamMETDataset(IterableDataset):
         if self.weight_exist:
             self.sampler = Sampler(self.path, **sampler_kwargs)
 
-        ## Iterate through the files and calculate the number of events
-        self.n_samples = 0
-        for file in tqdm(self.f_list, desc="counting events"):
-            with h5py.File(file, "r") as hf:
-                self.n_samples += len(hf["data/table"])
+        ## For validation we only use the first chunk of 399 in the file
+        self.is_val = dset == "val"
+        if self.is_val:
+            self.abs_start = 0
+            self.chunk_size = CHUNK_SIZE
+            self.chunks_per_file = 1
+
+        ## For training we can use all as many chunks as desired
+        else:
+            self.abs_start = CHUNK_SIZE
+            self.chunk_size = chunk_size
+            self.chunks_per_file = chunks_per_file
+
+        ## Count the number of samples used
+        self.n_samples = self.chunk_size * len(self.f_list) * self.chunks_per_file
+
+        ## For a full training set we should count the HDF file entries
+        if self.n_samples == 0:
+            for file in tqdm(self.f_list, desc="counting events"):
+                with h5py.File(file, "r") as hf:
+                    self.n_samples += len(hf["data/table"])
+            self.n_samples -= CHUNK_SIZE * len(self.f_list)
 
     def get_preprocess_info(self):
         """Return a dictionary of pre_processing and stat information"""
@@ -210,8 +224,6 @@ class StreamMETDataset(IterableDataset):
         This function is called SEPARATELY for each thread
         Think of it as a worker (thread) initialise function
         """
-        ## Before iteration shuffle the files so each epoch is different
-        self.shuffle_files()
 
         ## Get the worker info
         worker_info = T.utils.data.get_worker_info()
@@ -220,6 +232,7 @@ class StreamMETDataset(IterableDataset):
         if worker_info is None:
             worker_files = self.f_list
             worker_samples = self.n_samples
+            is_main_wrkr = True
 
         ## For multiple workers break up the file list so they each work on a subset
         else:
@@ -227,15 +240,20 @@ class StreamMETDataset(IterableDataset):
             worker_files = np.array_split(self.f_list, worker_info.num_workers)[
                 worker_info.id
             ]
-            ## Estimate the number of samples needed
-            worker_samples = self.n_samples // worker_info.num_workers
-
-        ## Further partition the worker's file list into the ones it open at a time
-        ofiles_list = chunk_given_size(worker_files, self.n_ofiles)
+            worker_samples = (
+                CHUNK_SIZE * len(worker_files)
+                if self.is_val
+                else self.n_samples // worker_info.num_workers
+            )
+            is_main_wrkr = worker_info.id == 0
 
         ## Cycle until stop iteration criterion is met
         n_returned = 0
         while True:
+
+            ## Partition the worker's file list into ones it will have open at a time
+            np.random.shuffle(worker_files)
+            ofiles_list = chunk_given_size(worker_files, self.n_ofiles)
 
             ## First iterate through the open files collection
             for ofiles in ofiles_list:
@@ -256,8 +274,8 @@ class StreamMETDataset(IterableDataset):
 
                         ## Drop all samples with weights of zero for the sampling meth
                         if self.sampler.weight_ratio > 0:
-                            buffer = buffer[weights>0]
-                            weights = weights[weights>0]
+                            buffer = buffer[weights > 0]
+                            weights = weights[weights > 0]
                     else:
                         weights = np.ones(len(buffer))
 
@@ -271,7 +289,16 @@ class StreamMETDataset(IterableDataset):
                         ## Look for potential exit condition
                         n_returned += 1
                         if n_returned >= worker_samples:
+
+                            ## Main worker is responsible for shuffling upon exit
+                            if is_main_wrkr:
+                                self.shuffle_files()
+
                             return
+
+                    ## For validation files we only use the first chunk!
+                    if c_count + 1 > self.chunks_per_file:
+                        break
 
     def load_chunks(self, files: list, c_count: int):
         """Returns a buffer of samples built from one chunk taken from a collection
@@ -283,12 +310,12 @@ class StreamMETDataset(IterableDataset):
         """
 
         ## Work out the bounds of the new chunk within the file
-        if isinstance(self.chunk_size, int):
-            start = c_count * self.chunk_size
-            stop = start + self.chunk_size
-        else:
+        if self.chunk_size == "all":
             start = None
             stop = None
+        else:
+            start = c_count * self.chunk_size + self.abs_start
+            stop = start + self.chunk_size + self.abs_start
 
         buffer = []
         for f in files:
@@ -296,7 +323,7 @@ class StreamMETDataset(IterableDataset):
 
                 ## Loading data with the var list gives an array of tuples, must conv
                 chunk = hf["data/table"][start:stop][self.var_list]
-                buffer += list(map(list, chunk)) ## Quicker than [list(e) for ...]
+                buffer += list(map(list, chunk))  ## Quicker than [list(e) for ...]
 
         ## Shuffle and return the buffer as a numpy array
         np.random.shuffle(buffer)

@@ -26,7 +26,8 @@ def main():
     data_conf, net_conf, train_conf = get_configs()
 
     ## Load the METNet Iterative datasets
-    train_set = StreamMETDataset(**data_conf)
+    train_set = StreamMETDataset(dset = "train", **data_conf)
+    valid_set = StreamMETDataset(dset = "val", **data_conf)
 
     ## Get the data dimensions and processing info
     do_rot = train_set.do_rot
@@ -40,7 +41,7 @@ def main():
     network.set_preproc(train_set.get_preprocess_info())
 
     ## Load the trainer, do this before saving incase any error arise
-    trainer = Trainer(network, train_set, **train_conf)
+    trainer = Trainer(network, train_set, valid_set, **train_conf)
 
     ## Create the save folder for the network and store the configuration dicts
     save_yaml_files(

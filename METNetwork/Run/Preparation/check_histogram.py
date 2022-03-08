@@ -18,12 +18,12 @@ def main():
 
     ## Create the dict for the dataset confid
     data_conf = {
-        "dset": "mini",
+        "dset": "val",
         "path": "/mnt/scratch/Data/METData/HDFs/WithSigAndEtaFix/",
         "do_rot": True,
         "inpts_rmv": ",",  ## Should remove all inputs except 1
-        "n_ofiles": 1,
-        "chunk_size": all,
+        "n_ofiles": 64,
+        "chunk_size": 3990,
         "sampler_kwargs": {},
     }
 
@@ -47,11 +47,11 @@ def main():
     ]
 
     ## Choosing the parameters weighting tests
-    weight_type = ["mag"]
-    weight_from = [0.0]
+    weight_type = ["trg"]
+    weight_from = [0.5]
     weight_to = [3.5]
     weight_shift = [0]
-    weight_ratio = [0]
+    weight_ratio = [1]
 
     ## Make all possible test options in a grid
     tests = np.array(

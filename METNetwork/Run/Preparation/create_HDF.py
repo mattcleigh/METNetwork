@@ -154,6 +154,7 @@ def main():
         mode="w",
         format="table",
         data_columns=True,
+        # chunksize=1000 TODO Test this option
     )
 
     ## Create a histogram based on Truth magnitude

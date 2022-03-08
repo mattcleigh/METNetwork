@@ -1,12 +1,12 @@
-dset: "mini"
 path: /mnt/scratch/Data/METData/HDFs/WithSigAndEtaFix/
 do_rot: True
 inpts_rmv: "Final,_ET"
 n_ofiles: 64
-chunk_size: 3990
+chunk_size: 399
+chunks_per_file: 1
 sampler_kwargs:
   weight_type: "mag"
   weight_from: 0.0
   weight_to: 3.5
   weight_shift: 0
-  weight_ratio: 0
+  weight_ratio: 1

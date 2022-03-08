@@ -8,6 +8,6 @@ loss_kwargs:
   dst_weight: 0
 dense_kwargs:
   act_h: silu
-  num_blocks: 5
-  hddn_dim: 512
+  num_blocks: 3
+  hddn_dim: 64
   nrm: layer
