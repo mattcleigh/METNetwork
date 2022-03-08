@@ -43,7 +43,7 @@ class METNetwork(nn.Module):
         self.register_buffer('inpt_idxes', inpt_idxes)
 
         ## Register a stats buffer with zero's for now, they will be filled if we load a previous save or a training dataset
-        inp_stats = T.zeros((2, len(myUT.feature_list())), dtype=T.float32)
+        inp_stats = T.zeros((2, len(inpt_list)), dtype=T.float32)
         trg_stats = T.zeros((2, 2), dtype=T.float32)
         self.register_buffer('inp_stats', inp_stats)
         self.register_buffer('trg_stats', trg_stats)
