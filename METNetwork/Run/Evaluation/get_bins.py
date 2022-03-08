@@ -3,7 +3,7 @@ A collection of good bin values for each sample and variable
 """
 
 def get_bins(sample, x_var=None, y_var=None):
-
+    print(x_var, y_var)
     ## Return nones as default
     left = None
     right = None
@@ -25,7 +25,7 @@ def get_bins(sample, x_var=None, y_var=None):
     ## Per sample bounds
     if "ttbar" in sample:
 
-        if x_var == "ET":
+        if x_var in ["True_ET", "ET"]:
             left = 0
             right = 350
             nbins = 20

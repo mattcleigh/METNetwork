@@ -228,21 +228,21 @@ def main():
 
     ## The variables to be binned for histogram comparisons between working points
     h_list = [
-        # binned_var("ET", 10, [0, 2000]),
+        binned_var("ET", 40, [0, 350]),
         # binned_var("Tight_Final_SumET", 10, [0, 2500]),
     ]
 
     ## All of the variables to be binned for the x_axis
     x_list = [
-        # binned_var("True_ET", 10, [0, 2000]),
-        # binned_var("ActMu", 10, [10, 60]),
-        binned_var("Tight_Final_SumET", 10, [200, 1000]),
+        binned_var("True_ET", 20, [0, 350]),
+        # binned_var("ActMu", 20, [10, 60]),
+        # binned_var("Tight_Final_SumET", 20, [200, 1000]),
     ]
 
     ## All of the variables to plot on the y axis these are just flags
     y_list = [
         "RMSE",
-        # "DLin",
+        "DLin",
     ]
 
     for proc, folder in processes:

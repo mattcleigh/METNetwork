@@ -186,7 +186,7 @@ def main():
             ax.set_xticklabels([])
             rax.set_xlabel(h.xlabel)
             rax.set_ylabel("Ratio to True")
-            rax.set_xlim(left=h.l, right=h.r)
+            rax.set_xlim(ax.get_xlim())
             rax.set_ylim(bottom=0.3, top=1.7)
             rax.grid(axis="y")
             fig.tight_layout()
