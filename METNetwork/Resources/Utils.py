@@ -47,7 +47,7 @@ def get_loss(name, **kwargs):
         'celoss': nn.CrossEntropyLoss(reduction='none', **kwargs),
         'bcewll': nn.BCEWithLogitsLoss(reduction='none', **kwargs),
         'engmmd': gl.SamplesLoss('energy'),
-        'snkhrn': gl.SamplesLoss('sinkhorn', p=1, blur=0.01),
+        'snkhrn1': gl.SamplesLoss('sinkhorn', p=1, blur=0.01),
         'snkhrn2': gl.SamplesLoss('sinkhorn', p=2, blur=0.01),
     }[name]
 
@@ -66,9 +66,6 @@ def get_grad_norm(model):
         total_norm += param_norm.item() ** 2
     total_norm = total_norm ** 0.5
     return total_norm
-
-def chunk_given_size(a, size):
-    return np.split(a, np.arange(size, len(a), size))
 
 def sel_device(dev):
     """

@@ -15,23 +15,21 @@ T.manual_seed(42)
 def main():
 
     ## To run over the GPU and the batch size for evaluation
-    do_gpu = False
+    device = "gpu"
     b_size = 10000
 
     ## The main directory to load the data from
     data_folder = "/mnt/scratch/Data/METData/Test/"
 
     ## A list of the network names and the name of the csv file to add to the datafiles
-    network_folder = "/mnt/scratch/Saved_Networks/"
+    network_folder = "/mnt/scratch/Saved_Networks/METNet"
     file_name = "models/net_best"
     network_names = [
-        ("QTPres/53096564_0_15_12_21", "Sampled_Mag"),
-        ("QTPres/53014519_0_13_12_21", "Sinkhorn_Mag"),
-        ("QTPres/53014390_0_13_12_21", "Base_Network"),
+        ("WithFix/56055011_0_07_03_22", "WithFixes"),
     ]
 
     ## Define the device to work on and set pytorch to not track gradients
-    device = sel_device("cpu")
+    device = sel_device(device)
     T.set_grad_enabled(False)
 
     ## Load the list of input data files
@@ -50,9 +48,9 @@ def main():
 
         ## Load the network and configure for full pass evaluation
         net = T.load(Path(network_folder, network_file, file_name), map_location=device)
-        net.device = device
-        net.do_proc = True
-        net.eval()
+        # net.device = device
+        # net.do_proc = True
+        # net.eval()
 
         ## Cycle through the input all input files
         for file in tqdm(all_files):

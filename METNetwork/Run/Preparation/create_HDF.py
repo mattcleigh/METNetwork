@@ -80,8 +80,8 @@ def main():
     output_path.mkdir(parents=True, exist_ok=True)
 
     ## Need to delete all HDF files in this folder to prevent partial overwriting
-    # for file in output_path.glob("sample-*.h5"):
-    #     Path(file).unlink()
+    for file in output_path.glob("sample-*.h5"):
+        Path(file).unlink()
 
     ## Work out the number of files being used and therefore the number of partitions needed
     file_search = str(Path(args.input_dir, args.file_match, "*.train-sample.csv"))
@@ -96,42 +96,42 @@ def main():
     col_names = list(df.columns)
 
     ## Remove DSID from the column names as it is not needed here
-    # df = df.drop("DSID", axis=1)
-    # col_names.remove("DSID")
+    df = df.drop("DSID", axis=1)
+    col_names.remove("DSID")
 
     ## Filter to only have nonzero values of True ET
-    # df = df[df["True_ET"] > 0]
+    df = df[df["True_ET"] > 0]
 
     ## Rotate the samples in the dataframe by changing each x and y coordinate
-    # if args.do_rot:
+    if args.do_rot:
 
-    #     ## Convert to array the dataframe (chunksize will match blocksize above)
-    #     arr = df.to_dask_array()
+        ## Convert to array the dataframe (chunksize will match blocksize above)
+        arr = df.to_dask_array()
 
-    #     ## Get the names and indices of the elements involved with the rotation
-    #     xcol_names = [col for col in col_names if "EX" in col]
-    #     ycol_names = [col for col in col_names if "EY" in col]
-    #     xs = [df.columns.get_loc(col) for col in xcol_names]
-    #     ys = [df.columns.get_loc(col) for col in ycol_names]
-    #     a_idx = df.columns.get_loc("Tight_Phi")
+        ## Get the names and indices of the elements involved with the rotation
+        xcol_names = [col for col in col_names if "EX" in col]
+        ycol_names = [col for col in col_names if "EY" in col]
+        xs = [df.columns.get_loc(col) for col in xcol_names]
+        ys = [df.columns.get_loc(col) for col in ycol_names]
+        a_idx = df.columns.get_loc("Tight_Phi")
 
-    #     ## Calculate new rotated elements
-    #     angles = arr[:, a_idx : a_idx + 1]
-    #     rotated_x = arr[:, xs] * da.cos(angles) + arr[:, ys] * da.sin(angles)
-    #     rotated_y = -arr[:, xs] * da.sin(angles) + arr[:, ys] * da.cos(angles)
+        ## Calculate new rotated elements
+        angles = arr[:, a_idx : a_idx + 1]
+        rotated_x = arr[:, xs] * da.cos(angles) + arr[:, ys] * da.sin(angles)
+        rotated_y = -arr[:, xs] * da.sin(angles) + arr[:, ys] * da.cos(angles)
 
-    #     ## Replace the appropriate columns in the original df with the corresponding ones in the rotated dfs
-    #     for i, col in enumerate(xcol_names):
-    #         df[col] = rotated_x[:, i]
-    #     for i, col in enumerate(ycol_names):
-    #         df[col] = rotated_y[:, i]
+        ## Replace the appropriate columns in the original df with the corresponding ones in the rotated dfs
+        for i, col in enumerate(xcol_names):
+            df[col] = rotated_x[:, i]
+        for i, col in enumerate(ycol_names):
+            df[col] = rotated_y[:, i]
 
     ## Get the stats from the entire dataset (compute now to to prevent mem leakage)
-    # print(" -- calculating and saving stats")
-    # mean = df.mean(axis=0).compute()
-    # sdev = df.std(axis=0).compute()
-    # stat_df = pd.concat([mean, sdev], axis=1).transpose()
-    # stat_df.to_csv(Path(output_path, "stats.csv"), index=False)
+    print(" -- calculating and saving stats")
+    mean = df.mean(axis=0).compute()
+    sdev = df.std(axis=0).compute()
+    stat_df = pd.concat([mean, sdev], axis=1).transpose()
+    stat_df.to_csv(Path(output_path, "stats.csv"), index=False)
 
     ## Load some previously calculate stats
     # print(' -- loading previously saved stats')
@@ -140,21 +140,21 @@ def main():
     # sdev = stat_df.iloc[1]
 
     ## Normalise and fix the column orders (they become alphabetical) we also ensure it will be saved as a float
-    # normed = (df - mean) / (sdev + 1e-6)
-    # normed = normed[col_names].astype(np.float32)
+    normed = (df - mean) / (sdev + 1e-8)
+    normed = normed[col_names].astype(np.float32)
 
     ## Add the unnormed True MET back in (used for weighting, only variable not normalised)
-    # normed["True_ET"] = df["True_ET"]
+    normed["True_ET"] = df["True_ET"]
 
     ## Save the normalised dataframe to HDF files using the data table (columns = True allows us to load specific columns by name)
-    # print(" -- creating output files")
-    # normed.to_hdf(
-    #     Path(output_path, "sample-*.h5"),
-    #     "data",
-    #     mode="w",
-    #     format="table",
-    #     data_columns=True,
-    # )
+    print(" -- creating output files")
+    normed.to_hdf(
+        Path(output_path, "sample-*.h5"),
+        "data",
+        mode="w",
+        format="table",
+        data_columns=True,
+    )
 
     ## Create a histogram based on Truth magnitude
     print(" -- creating magnitude histogram")
@@ -171,24 +171,24 @@ def main():
     )
 
     ## Create a histogram using the normed targets
-    # print(" -- creating target space histogram")
-    # trg_bins = [np.linspace(-4, 4, 50 + 1) + args.do_rot, np.linspace(-4, 4, 50 + 1)]
-    # trg_hist = da.histogram2d(
-    #     normed["True_EX"].to_dask_array(),
-    #     normed["True_EY"].to_dask_array(),
-    #     trg_bins,
-    #     density=True,
-    # )[0]
+    print(" -- creating target space histogram")
+    trg_bins = [np.linspace(-4, 4, 50 + 1) + args.do_rot, np.linspace(-4, 4, 50 + 1)]
+    trg_hist = da.histogram2d(
+        normed["True_EX"].to_dask_array(),
+        normed["True_EY"].to_dask_array(),
+        trg_bins,
+        density=True,
+    )[0]
 
-    # trg_hist = trg_hist.compute()
-    # myPL.plot_and_save_contours(
-    #     Path(output_path, "TrgDist"),
-    #     [trg_hist],
-    #     ["Truth"],
-    #     ["scaled-x", "scaled-y"],
-    #     trg_bins,
-    #     do_csv=True,
-    # )
+    trg_hist = trg_hist.compute()
+    myPL.plot_and_save_contours(
+        Path(output_path, "TrgDist"),
+        [trg_hist],
+        ["Truth"],
+        ["scaled-x", "scaled-y"],
+        trg_bins,
+        do_csv=True,
+    )
 
 
 if __name__ == "__main__":

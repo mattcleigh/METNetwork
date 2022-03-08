@@ -11,6 +11,7 @@ from tqdm import tqdm
 
 from mattstools.utils import undo_mid
 
+
 def main():
 
     ## The program settings
@@ -34,7 +35,7 @@ def main():
         df = pd.read_csv(file)
 
         ## Split into bins
-        bins = pd.cut(df.True_ET/1000, bin_edges, labels=False, include_lowest=True)
+        bins = pd.cut(df.True_ET / 1000, bin_edges, labels=False, include_lowest=True)
 
         ## Use the bins to calculate the spline values
         sp_vals = spline[bins.to_numpy(dtype=np.int64)]
@@ -44,8 +45,13 @@ def main():
         is_passed = rndm < sp_vals
 
         ## Save two versions of the dataframe
-        df[is_passed].to_csv(Path(out_passed, Path(inpt_dir).name , file.name), index=False)
-        df[~is_passed].to_csv(Path(out_failed, Path(inpt_dir).name , file.name), index=False)
+        df[is_passed].to_csv(
+            Path(out_passed, Path(inpt_dir).name, file.name), index=False
+        )
+        df[~is_passed].to_csv(
+            Path(out_failed, Path(inpt_dir).name, file.name), index=False
+        )
+
 
 if __name__ == "__main__":
     main()

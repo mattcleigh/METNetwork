@@ -1,0 +1,13 @@
+b_size: 1024
+patience: 30
+max_epochs: 30
+grad_clip: 10
+n_workers: 15
+optim_dict:
+  name: adamw
+  lr: 1.0e-5
+sched_dict:
+  name: none
+vis_every: 1
+chkp_every: 25
+quick_mode: False
