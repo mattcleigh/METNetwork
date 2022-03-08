@@ -1,5 +1,5 @@
 base_kwargs:
-  name: Test
+  name: Test2
   save_dir: /mnt/scratch/Saved_Networks/METNet/
   device: gpu
 loss_kwargs:
