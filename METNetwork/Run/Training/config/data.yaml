@@ -1,6 +1,6 @@
 path: /mnt/scratch/Data/METData/HDFs/WithSigAndEtaFix/
 do_rot: False
-inpts_rmv: "Final,_ET"
+inpts_rmv: ""
 n_ofiles: 64
 chunk_size: 1197
 chunks_per_file: 1
@@ -9,4 +9,4 @@ sampler_kwargs:
   weight_from: 0.0
   weight_to: 3.5
   weight_shift: 0
-  weight_ratio: 0
+  weight_ratio: 1

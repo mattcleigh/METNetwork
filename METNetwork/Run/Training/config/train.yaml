@@ -2,7 +2,7 @@ b_size: 1024
 patience: 30
 max_epochs: 30
 grad_clip: 10
-n_workers: 15
+n_workers: 0
 optim_dict:
   name: adamw
   lr: 1.0e-5

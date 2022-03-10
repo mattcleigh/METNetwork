@@ -10,7 +10,7 @@ from mattstools.utils import save_yaml_files, print_dict
 
 from METNetwork.resources.utils import get_configs
 from METNetwork.resources.datasets import StreamMETDataset
-from METNetwork.resources.networks import METNet
+from METNetwork.resources.networks import METNet, METNetClass
 
 import torch as T
 
@@ -29,16 +29,20 @@ def main():
     train_set = StreamMETDataset(dset = "train", **data_conf)
     valid_set = StreamMETDataset(dset = "val", **data_conf)
 
+    ## Get the preprocessing information
+    preproc = train_set.get_preprocess_info()
+
     ## Get the data dimensions and processing info
-    do_rot = train_set.do_rot
     net_conf["base_kwargs"]["inpt_dim"] = len(train_set.inpt_list)
     net_conf["base_kwargs"]["outp_dim"] = 2
+    net_conf["metnet_kwargs"]["do_rot"] = train_set.do_rot
+    net_conf["metnet_kwargs"]["n_wpnts"] = len(preproc["wpnt_xs"])
 
     ## Create the network
-    network = METNet(do_rot, **net_conf)
+    network = METNetClass(**net_conf)
 
     ## Save the preprocessing buffers on the network
-    network.set_preproc(train_set.get_preprocess_info())
+    network.set_preproc(preproc)
 
     ## Load the trainer, do this before saving incase any error arise
     trainer = Trainer(network, train_set, valid_set, **train_conf)
