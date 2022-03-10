@@ -175,6 +175,16 @@ class StreamMETDataset(IterableDataset):
             [feature_list().index(i) for i in self.inpt_list], dtype=T.long
         )
 
+        ## Get the workinng point idxes from the input list
+        info["wpnt_xs"] = T.tensor(
+            [self.inpt_list.index(f) for f in self.inpt_list if "Final_EX" in f],
+            dtype=T.long,
+        )
+        info["wpnt_ys"] = T.tensor(
+            [self.inpt_list.index(f) for f in self.inpt_list if "Final_EY" in f],
+            dtype=T.long,
+        )
+
         ## Get the names and indices of the selected vars involved with the rotation
         info["x_idxes"] = T.tensor(
             [self.inpt_list.index(f) for f in self.inpt_list if "EX" in f], dtype=T.long

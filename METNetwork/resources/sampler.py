@@ -83,7 +83,7 @@ class Sampler:
 
         ## Load the one dimensional histogram of raw magnitude
         if weight_type == "mag":
-            weight_from *= 1e5 ## weight from and to is given in hundred GeV for mag
+            weight_from *= 1e5  ## weight from and to is given in hundred GeV for mag
             weight_to *= 1e5
 
             ## Load the histogram and extract the bin definitions
