@@ -132,12 +132,12 @@ class StreamMETDataset(IterableDataset):
         self.var_list = self.inpt_list + ["True_ET", "True_EX", "True_EY"]
 
         ## Get the list of files to use
-        self.path = Path(path, "Rotated" if do_rot else "Raw")
-        self.f_list = list(self.path.glob("*.h5"))
+        self.path = Path(path, "Rotated/" if do_rot else "Raw/")
+        self.f_list = list(self.path.glob("*.h5"))[:500]
 
         ## Exit if no files can be found
         if not self.f_list:
-            raise LookupError("No HDF files could be found in ", path)
+            raise LookupError("No HDF files could be found in ", self.path)
 
         ## Init the sampler weight class
         if self.weight_exist:

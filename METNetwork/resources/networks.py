@@ -7,7 +7,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 import torch as T
-import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from mattstools.modules import DenseNetwork
@@ -331,15 +331,15 @@ class METNetClass(MyNetBase):
         self.dst_loss_nm = dst_loss_fn
         self.loss_names += [self.reg_loss_nm, self.dst_loss_nm]
         self.dst_weight = dst_weight
-        self.do_dst = self.dst_weight > 0
+        self.do_dst = False
 
         ## The actual loss functions
         self.reg_loss_fn = get_loss_fn(self.reg_loss_nm)
-        self.dst_loss_fn = get_loss_fn(self.dst_loss_nm)
+        # self.dst_loss_fn = get_loss_fn(self.dst_loss_nm)
 
         ## Initialise the dense network
         self.dense_net = DenseNetwork(
-            inpt_dim=self.inpt_dim, outp_dim=n_wpnts, act_o = "softmax", **dense_kwargs
+            inpt_dim=self.inpt_dim, outp_dim=n_wpnts, **dense_kwargs
         )
 
         ## Move the network to the selected device
@@ -349,16 +349,16 @@ class METNetClass(MyNetBase):
         """Calculate the MET by combining the working points
         """
         ## Calculate the weights for the sum
-        weights = self.dense_net(inputs)
+        weights = F.softmax(self.dense_net(inputs), dim=-1).unsqueeze(-1)
 
         ## Pull and unormalise the working points manually from the inputs
         if wpts is None:
             wpnt_xs = inputs[:, self.wpnt_xs]  * self.inpt_sdevs[self.wpnt_xs] + self.inpt_means[self.wpnt_xs]
             wpnt_ys = inputs[:, self.wpnt_ys]  * self.inpt_sdevs[self.wpnt_ys] + self.inpt_means[self.wpnt_ys]
-            wpts = T.cat([wpnt_xs, wpnt_ys], dim=-1)
+            wpts = T.cat([wpnt_xs.unsqueeze(-1), wpnt_ys.unsqueeze(-1)], dim=-1)
 
         ## Return the sum
-        return weights * wpts
+        return (weights * wpts).sum(dim=-2)
 
 
     def get_losses(self, sample):
@@ -374,7 +374,7 @@ class METNetClass(MyNetBase):
         targets = targets * self.outp_sdevs + self.outp_means
 
         ## Calculate the weighted regression loss
-        reg_loss = (self.reg_loss_fn(outputs, targets).mean(dim=1) * weights).mean()
+        reg_loss = (self.reg_loss_fn(outputs, targets).mean(dim=-1) * weights).mean()
 
         ## Calculate the distance matching loss (if required)
         if self.do_dst:

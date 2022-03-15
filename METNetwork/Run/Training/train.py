@@ -35,8 +35,8 @@ def main():
     ## Get the data dimensions and processing info
     net_conf["base_kwargs"]["inpt_dim"] = len(train_set.inpt_list)
     net_conf["base_kwargs"]["outp_dim"] = 2
-    net_conf["metnet_kwargs"]["do_rot"] = train_set.do_rot
-    net_conf["metnet_kwargs"]["n_wpnts"] = len(preproc["wpnt_xs"])
+    net_conf["do_rot"] = train_set.do_rot
+    net_conf["n_wpnts"] = len(preproc["wpnt_xs"])
 
     ## Create the network
     network = METNetClass(**net_conf)

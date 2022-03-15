@@ -1,6 +1,12 @@
+atlasify
 matplotlib
 numpy
+scipy
 torch
+onnx
+onnxruntime
 tqdm
 pandas
 dask
+h5py
+tables

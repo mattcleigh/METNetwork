@@ -1,14 +1,12 @@
 base_kwargs:
   name: TestClass
-  save_dir: /mnt/scratch/Saved_Networks/METNet/
+  save_dir: /home/users/l/leighm/scratch/Saved_Networks/METNet/
   device: gpu
-metnet_kwargs:
-  do_class: False
-  reg_loss_fn: huber
-  dst_loss_fn: engmmd
-  dst_weight: 0
-  dense_kwargs:
-    act_h: silu
-    num_blocks: 3
-    hddn_dim: 64
-    nrm: layer
+reg_loss_fn: huber
+dst_loss_fn: engmmd
+dst_weight: 10
+dense_kwargs:
+  act_h: silu
+  num_blocks: 3
+  hddn_dim: 128
+  nrm: layer
