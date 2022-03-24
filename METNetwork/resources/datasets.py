@@ -120,14 +120,13 @@ class StreamMETDataset(IterableDataset):
         ## Default dict
         sampler_kwargs = sampler_kwargs or {}
 
-        ## Class attributes
+        ## Class configurations
         self.do_rot = do_rot
         self.n_ofiles = n_ofiles
-
         self.weight_exist = sampler_kwargs["weight_to"] > 0  ## Kept constant
         self.do_weights = self.weight_exist  ##  Can be toggled on and off
 
-        ## Save the input list and the var list which always has these three extra!
+        ## Save the input and var list which always has these three extra!
         self.inpt_list = create_input_list(inpts_rmv, do_rot)
         self.var_list = self.inpt_list + ["True_ET", "True_EX", "True_EY"]
 
@@ -156,11 +155,13 @@ class StreamMETDataset(IterableDataset):
             self.chunk_size = chunk_size
             self.chunks_per_file = chunks_per_file
 
+        print(f" - using {self.chunks_per_file} chunks per file")
+
         ## Count the number of samples used
         self.n_samples = self.chunk_size * len(self.f_list) * self.chunks_per_file
 
         ## For a full training set we should count the HDF file entries
-        if self.n_samples == 0:
+        if self.n_samples <= 0:
             for file in tqdm(self.f_list, desc="counting events"):
                 with h5py.File(file, "r") as hf:
                     self.n_samples += len(hf["data/table"])
@@ -246,15 +247,19 @@ class StreamMETDataset(IterableDataset):
 
         ## For multiple workers break up the file list so they each work on a subset
         else:
+
             ## Split the files and pick using the id
             worker_files = np.array_split(self.f_list, worker_info.num_workers)[
                 worker_info.id
             ]
-            worker_samples = (
-                CHUNK_SIZE * len(worker_files)
-                if self.is_val
-                else self.n_samples // worker_info.num_workers
-            )
+
+            ## Check how many samples these files should return
+            if self.chunks_per_file: ## Exact measurement
+                worker_samples = self.chunk_size * len(self.f_list) * self.chunks_per_file
+            else: ## Estimated based on number of total samples
+                worker_samples =  self.n_samples // worker_info.num_workers
+
+            ## The 0th worker is the main worker and is responsible for shuffling
             is_main_wrkr = worker_info.id == 0
 
         ## Cycle until stop iteration criterion is met
@@ -282,10 +287,9 @@ class StreamMETDataset(IterableDataset):
                     if self.do_weights:
                         weights = self.sampler.apply(buffer[:, -3:])
 
-                        ## Drop all samples with weights of zero for the sampling meth
-                        if self.sampler.weight_ratio > 0:
-                            buffer = buffer[weights > 0]
-                            weights = weights[weights > 0]
+                        ## Drop all samples with weights of zero
+                        buffer = buffer[weights > 0]
+                        weights = weights[weights > 0]
                     else:
                         weights = np.ones(len(buffer))
 
@@ -306,7 +310,7 @@ class StreamMETDataset(IterableDataset):
 
                             return
 
-                    ## For validation files we only use the first chunk!
+                    ## Break after iterating through the required number of chunks
                     if c_count + 1 > self.chunks_per_file:
                         break
 
@@ -325,12 +329,11 @@ class StreamMETDataset(IterableDataset):
             stop = None
         else:
             start = c_count * self.chunk_size + self.abs_start
-            stop = start + self.chunk_size + self.abs_start
+            stop = start + self.chunk_size
 
         buffer = []
         for f in files:
             with h5py.File(f, "r") as hf:
-
                 ## Loading data with the var list gives an array of tuples, must conv
                 chunk = hf["data/table"][start:stop][self.var_list]
                 buffer += list(map(list, chunk))  ## Quicker than [list(e) for ...]

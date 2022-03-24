@@ -1,9 +1,9 @@
 base_kwargs:
-  name: TestClass
-  save_dir: /home/users/l/leighm/scratch/Saved_Networks/METNet/
+  name: Test
+  save_dir: /mnt/scratch/Saved_Networks/METNet/
   device: gpu
 reg_loss_fn: huber
-dst_loss_fn: engmmd
+dst_loss_fn: energymmd
 dst_weight: 10
 dense_kwargs:
   act_h: silu

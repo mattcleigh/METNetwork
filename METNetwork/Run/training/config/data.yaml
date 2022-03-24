@@ -1,0 +1,12 @@
+path: /mnt/scratch/Data/METData/HDFs/WithSigAndEtaFix_ttbar/
+do_rot: False
+inpts_rmv: xxx
+n_ofiles: 1
+chunk_size: 1197
+chunks_per_file: 1
+sampler_kwargs:
+  weight_type: "mag"
+  weight_from: 0.0
+  weight_to: 0
+  weight_shift: 0
+  weight_ratio: 0

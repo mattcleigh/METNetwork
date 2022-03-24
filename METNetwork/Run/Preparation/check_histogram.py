@@ -8,7 +8,7 @@ import torch as T
 from torch.utils.data import DataLoader
 
 from METNetwork.resources.datasets import StreamMETDataset
-from METNetwork.Resources import Plotting as myPL
+from METNetwork.resources.plotting import plot_and_save_contours, plot_and_save_hists
 
 T.set_grad_enabled(False)
 cmap = plt.get_cmap("turbo")
@@ -125,14 +125,14 @@ def main():
     ]
 
     ## Save the Magnitude histograms
-    myPL.plot_and_save_hists(
+    plot_and_save_hists(
         Path("S_MagDistTR"),
         mag_list,
         names,
         [r"$p_\mathrm{T}^\mathrm{miss}$ [GeV]", "Normalised"],
         mag_bins,
     )
-    myPL.plot_and_save_contours(
+    plot_and_save_contours(
         Path("S_TrgDistTR"),
         trg_list,
         names,
@@ -140,7 +140,7 @@ def main():
         trg_bins,
         do_csv=True,
     )
-    myPL.plot_and_save_contours(
+    plot_and_save_contours(
         Path("S_ExyDistTR"),
         exy_list,
         names,

@@ -5,13 +5,9 @@ import re
 import atlasify as at
 
 from pathlib import Path
-from pandas.plotting import parallel_coordinates
 
-import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as font_manager
-
-from METNetwork.Resources import Plotting as myPL
 
 font = font_manager.FontProperties(family="monospace")
 
