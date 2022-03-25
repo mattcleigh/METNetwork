@@ -93,7 +93,7 @@ class StreamMETDataset(IterableDataset):
         inpts_rmv: str = "xxx",
         n_ofiles: int = 64,
         chunk_size: int = CHUNK_SIZE * 10,
-        chunks_per_file: int = 0,
+        do_single_chunk: bool = False,
         sampler_kwargs: dict = None,
     ):
         """
@@ -105,8 +105,7 @@ class StreamMETDataset(IterableDataset):
             n_ofiles:  Nnumber of files to read from simultaneously
                        larger = more memory but better shuffling
             chunk_size: The size of the chunk to read from each of the ofiles
-            chunks_per_file: The number of chunks to load from each file
-                - 0 = all and is what should be used to train full models
+            do_single_chunk: Only load one chunk per HDF file
             sampler_kwargs: Keyword arguments for the weighted sampler
         """
         super().__init__()
@@ -148,23 +147,23 @@ class StreamMETDataset(IterableDataset):
         if self.is_val:
             self.abs_start = 0
             self.chunk_size = CHUNK_SIZE
-            self.chunks_per_file = 1
+            self.do_single_chunk = True
 
         ## For training we can use all as many chunks as desired
         else:
             self.abs_start = CHUNK_SIZE
             self.chunk_size = chunk_size
-            self.chunks_per_file = chunks_per_file
+            self.do_single_chunk = do_single_chunk
 
         ## Count the number of samples used
-        self.n_samples = self.chunk_size * len(self.f_list) * self.chunks_per_file
-
-        ## For a full training set we should count the HDF file entries
-        if self.n_samples == 0:
+        if self.do_single_chunk:
+            self.n_samples = self.chunk_size * len(self.f_list)
+        else:
+            self.n_samples = 0
             for file in tqdm(self.f_list, desc="counting events"):
                 with h5py.File(file, "r") as hf:
                     self.n_samples += len(hf["data/table"])
-            self.n_samples -= CHUNK_SIZE * len(self.f_list)
+            self.n_samples -= CHUNK_SIZE * len(self.f_list) ## Subtract val samples
 
     def get_preprocess_info(self):
         """Return a dictionary of pre_processing and stat information"""
@@ -226,26 +225,23 @@ class StreamMETDataset(IterableDataset):
         """
 
         ## Get the worker info
-        worker_info = T.utils.data.get_worker_info()
+        w_info = T.utils.data.get_worker_info()
 
         ## If it is None we are doing single process loading, worker uses whole f_list
-        if worker_info is None:
+        if w_info is None:
+            is_main_wrkr = True
             worker_files = self.f_list
             worker_samples = self.n_samples
-            is_main_wrkr = True
 
         ## For multiple workers break up the file list so they each work on a subset
         else:
-            ## Split the files and pick using the id
-            worker_files = np.array_split(self.f_list, worker_info.num_workers)[
-                worker_info.id
-            ]
-            worker_samples = (
-                CHUNK_SIZE * len(worker_files)
-                if self.is_val
-                else self.n_samples // worker_info.num_workers
-            )
-            is_main_wrkr = worker_info.id == 0
+            is_main_wrkr = w_info.id == 0
+            worker_files = np.array_split(self.f_list, w_info.num_workers)[w_info.id]
+            if self.do_single_chunk:
+                worker_samples = self.chunk_size * len(worker_files)
+            else:
+                worker_samples = self.n_samples // w_info.num_workers
+
 
         ## Cycle until stop iteration criterion is met
         n_returned = 0
@@ -296,8 +292,8 @@ class StreamMETDataset(IterableDataset):
 
                             return
 
-                    ## For validation files we only use the first chunk!
-                    if c_count + 1 > self.chunks_per_file:
+                    ## Break after a single chunk
+                    if self.do_single_chunk:
                         break
 
     def load_chunks(self, files: list, c_count: int):

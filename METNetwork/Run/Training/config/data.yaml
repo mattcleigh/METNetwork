@@ -6,7 +6,7 @@ chunk_size: 1197
 chunks_per_file: 1
 sampler_kwargs:
   weight_type: "mag"
-  weight_from: 0.0
+  weight_from: 0.4
   weight_to: 3.5
   weight_shift: 0
-  weight_ratio: 0
+  weight_ratio: 1

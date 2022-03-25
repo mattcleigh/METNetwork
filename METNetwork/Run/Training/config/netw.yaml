@@ -5,9 +5,9 @@ base_kwargs:
 loss_kwargs:
   reg_loss_fn: huber
   dst_loss_fn: engmmd
-  dst_weight: 0
+  dst_weight: 1
 dense_kwargs:
   act_h: silu
-  num_blocks: 3
-  hddn_dim: 64
+  num_blocks: 5
+  hddn_dim: 256
   nrm: layer
